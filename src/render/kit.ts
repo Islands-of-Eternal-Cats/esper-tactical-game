@@ -51,13 +51,73 @@ function hash01(id: string, salt: number): number {
   return (h >>> 8) / 0x1000000
 }
 
+/**
+ * Оболочка блока стен: геометрия, в которой есть только внешние грани.
+ *
+ * Грань выпускается, только если соседней клетки-стены с этой стороны нет.
+ * Прозрачный материал не пишет глубину и потому рисует всё, что ему дали, —
+ * гасящиеся кубы показали бы и замурованные внутри блока грани, и блок вышел
+ * бы ребристым, с внутренними стенками. У оболочки внутренних граней нет
+ * вовсе, а отсечение задних даёт ровно один слой поверхности.
+ *
+ * Сплошные стены остаются InstancedMesh: там всё это невидимо, и решение об
+ * инстансинге повторяющейся геометрии остаётся в силе.
+ */
+function buildShell(cells: readonly Cell[], world: WorldView): THREE.BufferGeometry {
+  const present = new Set(cells.map((c) => c.y * world.width + c.x))
+  const position: number[] = []
+  const normal: number[] = []
+  const index: number[] = []
+
+  /** Четырёхугольник обходом против часовой стрелки, если смотреть снаружи. */
+  const quad = (v: readonly number[], n: readonly number[]): void => {
+    const base = position.length / 3
+    position.push(...v)
+    for (let i = 0; i < 4; i++) normal.push(...n)
+    index.push(base, base + 1, base + 2, base, base + 2, base + 3)
+  }
+
+  const p = new THREE.Vector3()
+  const h = WALL_H
+
+  for (const cell of cells) {
+    cellToWorld(cell, world, p)
+    const x = p.x
+    const z = p.z
+    const solid = (dx: number, dy: number): boolean =>
+      present.has((cell.y + dy) * world.width + (cell.x + dx))
+
+    if (!solid(1, 0)) {
+      quad([x + 0.5, 0, z + 0.5, x + 0.5, 0, z - 0.5, x + 0.5, h, z - 0.5, x + 0.5, h, z + 0.5], [1, 0, 0])
+    }
+    if (!solid(-1, 0)) {
+      quad([x - 0.5, 0, z - 0.5, x - 0.5, 0, z + 0.5, x - 0.5, h, z + 0.5, x - 0.5, h, z - 0.5], [-1, 0, 0])
+    }
+    if (!solid(0, 1)) {
+      quad([x - 0.5, 0, z + 0.5, x + 0.5, 0, z + 0.5, x + 0.5, h, z + 0.5, x - 0.5, h, z + 0.5], [0, 0, 1])
+    }
+    if (!solid(0, -1)) {
+      quad([x + 0.5, 0, z - 0.5, x - 0.5, 0, z - 0.5, x - 0.5, h, z - 0.5, x + 0.5, h, z - 0.5], [0, 0, -1])
+    }
+    // Верх открыт всегда, низ не виден никогда: стены не ставятся друг на друга.
+    quad([x - 0.5, h, z + 0.5, x + 0.5, h, z + 0.5, x + 0.5, h, z - 0.5, x - 0.5, h, z - 0.5], [0, 1, 0])
+  }
+
+  const geometry = new THREE.BufferGeometry()
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(position, 3))
+  geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normal, 3))
+  geometry.setIndex(index)
+  return geometry
+}
+
 export class Kit {
   private readonly wallMatrices: THREE.Matrix4[] = []
   private readonly wallIndexByCell = new Map<number, number>()
   /** Номер сплошного блока для каждой стенной клетки. Гаснет блок целиком. */
   private readonly wallBlockOf: number[] = []
   private readonly wallsSolid: THREE.InstancedMesh
-  private readonly wallsGhost: THREE.InstancedMesh
+  /** Оболочка на блок: показывается вместо его кубов, когда блок гаснет. */
+  private readonly ghostShells: THREE.Mesh[] = []
   private ghostSignature = -1
 
   private readonly piles: THREE.InstancedMesh
@@ -99,28 +159,29 @@ export class Kit {
       this.wallIndexByCell.set(cell.y * width + cell.x, i)
     })
 
-    this.groupWallsIntoBlocks(world)
+    const blocks = this.groupWallsIntoBlocks(world)
 
-    const count = Math.max(1, world.walls.length)
     this.wallsSolid = new THREE.InstancedMesh(
       wallGeo,
       new THREE.MeshLambertMaterial({ color: PALETTE.wall }),
-      count,
+      Math.max(1, world.walls.length),
     )
-    this.wallsGhost = new THREE.InstancedMesh(
-      wallGeo,
-      new THREE.MeshLambertMaterial({
-        color: PALETTE.wall,
-        transparent: true,
-        opacity: 0.3,
-        // Не пишет глубину: иначе загородила бы сама себя и кота за собой.
-        depthWrite: false,
-      }),
-      count,
-    )
-    this.wallsGhost.renderOrder = 2
     scene.add(this.wallsSolid)
-    scene.add(this.wallsGhost)
+
+    const ghostMaterial = new THREE.MeshLambertMaterial({
+      color: PALETTE.wall,
+      transparent: true,
+      opacity: 0.36,
+      // Не пишет глубину: иначе загородила бы кота, стоящего за ней.
+      depthWrite: false,
+    })
+    for (const cells of blocks) {
+      const shell = new THREE.Mesh(buildShell(cells, world), ghostMaterial)
+      shell.renderOrder = 2
+      shell.visible = false
+      this.ghostShells.push(shell)
+      scene.add(shell)
+    }
 
     const container = new THREE.Mesh(
       new THREE.BoxGeometry(1.5, 1.05, 1.5),
@@ -170,13 +231,14 @@ export class Kit {
    * пропавшую геометрию, а не как «сквозь неё видно». Блок целиком читается
    * с первого взгляда.
    */
-  private groupWallsIntoBlocks(world: WorldView): void {
+  private groupWallsIntoBlocks(world: WorldView): Cell[][] {
     const n = world.walls.length
     for (let i = 0; i < n; i++) this.wallBlockOf.push(-1)
 
-    let block = 0
+    const blocks: Cell[][] = []
     for (let start = 0; start < n; start++) {
       if (this.wallBlockOf[start] !== -1) continue
+      const block = blocks.length
       const queue = [start]
       this.wallBlockOf[start] = block
       for (let head = 0; head < queue.length; head++) {
@@ -188,8 +250,9 @@ export class Kit {
           queue.push(j)
         }
       }
-      block++
+      blocks.push(queue.map((i) => world.walls[i]!))
     }
+    return blocks
   }
 
   private markOccluders(cell: Cell, into: Set<number>): void {
@@ -224,16 +287,16 @@ export class Kit {
     this.ghostSignature = signature
 
     let solid = 0
-    let faded = 0
     for (let i = 0; i < this.wallMatrices.length; i++) {
-      const m = this.wallMatrices[i]!
-      if (ghost.has(this.wallBlockOf[i]!)) this.wallsGhost.setMatrixAt(faded++, m)
-      else this.wallsSolid.setMatrixAt(solid++, m)
+      if (ghost.has(this.wallBlockOf[i]!)) continue
+      this.wallsSolid.setMatrixAt(solid++, this.wallMatrices[i]!)
     }
     this.wallsSolid.count = solid
-    this.wallsGhost.count = faded
     this.wallsSolid.instanceMatrix.needsUpdate = true
-    this.wallsGhost.instanceMatrix.needsUpdate = true
+
+    this.ghostShells.forEach((shell, block) => {
+      shell.visible = ghost.has(block)
+    })
   }
 
   private syncPiles(piles: readonly PileView[]): void {
