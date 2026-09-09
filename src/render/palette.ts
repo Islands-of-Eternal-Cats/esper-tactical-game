@@ -10,6 +10,7 @@ export const PALETTE = {
   floor: 0x2b313a,
   floorEdge: 0x1b1f26,
   wall: 0x3b434f,
+  wallGhostEdge: 0x93a4ba,
   wallTop: 0x49525f,
   container: 0x35505c,
   pile: 0x6b6357,

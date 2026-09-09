@@ -175,10 +175,28 @@ export class Kit {
       // Не пишет глубину: иначе загородила бы кота, стоящего за ней.
       depthWrite: false,
     })
+    const edgeMaterial = new THREE.LineBasicMaterial({
+      color: PALETTE.wallGhostEdge,
+      transparent: true,
+      opacity: 0.5,
+      depthWrite: false,
+    })
     for (const cells of blocks) {
-      const shell = new THREE.Mesh(buildShell(cells, world), ghostMaterial)
+      const geometry = buildShell(cells, world)
+      const shell = new THREE.Mesh(geometry, ghostMaterial)
       shell.renderOrder = 2
       shell.visible = false
+
+      // Контур — не украшение, а единственный признак объёма у погасшей
+      // стены. Заливка одна показывает крышу плоским пятном, и куча за
+      // стеной читается лежащей на этой крыше. EdgesGeometry отбрасывает
+      // рёбра между гранями в одной плоскости, поэтому клетки внутри блока
+      // следов не оставляют, а нижние рёбра остаются: это след стены на
+      // земле, то самое, за что цепляется глаз.
+      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geometry), edgeMaterial)
+      edges.renderOrder = 3
+      shell.add(edges)
+
       this.ghostShells.push(shell)
       scene.add(shell)
     }
