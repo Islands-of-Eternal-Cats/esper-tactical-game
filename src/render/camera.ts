@@ -17,7 +17,8 @@ const MAX_ZOOM = 1.4
  */
 const VIEW_SIZE = 21
 
-const GROUND = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)
+const UP = new THREE.Vector3(0, 1, 0)
+const GROUND = new THREE.Plane(UP, 0)
 
 export class IsoCamera {
   readonly camera: THREE.OrthographicCamera
@@ -69,14 +70,29 @@ export class IsoCamera {
     this.apply()
   }
 
+  /**
+   * Панорама «схватил карту»: двор идёт за курсором, а не против него.
+   *
+   * Цель камеры смещается навстречу жесту, поэтому знаки обратны сдвигу
+   * курсора. По вертикали к этому добавляется второй разворот: экранное
+   * «вниз» — это минус `forward`, а clientY растёт вниз, и два минуса дают
+   * плюс. Без него карта уезжала вверх, когда курсор шёл вниз.
+   */
   pan(dxPixels: number, dyPixels: number): void {
     const k = this.unitsPerPixel
     const right = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 0)
     const up = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 1)
     // Экранное «вверх», уложенное на землю: панорама не должна поднимать камеру.
-    const forward = up.projectOnPlane(new THREE.Vector3(0, 1, 0)).normalize()
+    const forward = up.clone().projectOnPlane(UP).normalize()
+
+    // Земля видна под наклоном, поэтому шаг по ней даёт меньше экранной
+    // вертикали, чем горизонтали: ровно столько, сколько forward сохранил от
+    // экранного «вверх». Без поправки двор отстаёт от курсора вниз-вверх, но
+    // точно поспевает вправо-влево — `right` лежит и в земле, и в экране.
+    const foreshortening = Math.max(forward.dot(up), 0.05)
+
     this.target.addScaledVector(right, -dxPixels * k)
-    this.target.addScaledVector(forward, -dyPixels * k)
+    this.target.addScaledVector(forward, (dyPixels * k) / foreshortening)
     this.apply()
   }
 
