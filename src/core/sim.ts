@@ -8,7 +8,7 @@
 
 import type { Cell, Snapshot, WorldView } from '../shared/protocol'
 import { UNIT, tickAmount } from './fixed'
-import { ORTHO, dirOf, stepCost } from './grid'
+import { ORTHO, dirOf, octile, stepCost } from './grid'
 import { inZone, pileById, rankPiles, release } from './jobs'
 import { Rng } from './rng'
 import type { Cat, CatMode, Pile, State, Zone } from './state'
@@ -221,17 +221,49 @@ export class Sim {
     return false
   }
 
-  private arriveAtPile(cat: Cat): void {
-    const pile = pileById(this.state, cat.target)
-    if (pile === null || pile.volume <= 0) {
-      release(this.state, cat)
-      cat.mode = 'idle'
-      return
+  /**
+   * Путь к клетке, с которой кот работает с кучей.
+   *
+   * Он встаёт рядом, а не поверх: стоя на куче, он её собой и закрывает, и
+   * игрок не видит ни что убирается, ни сколько осталось. Заодно у пылесоса
+   * появляется направление — то самое, от которого на шаге 6 строится
+   * анимация работы.
+   */
+  private approach(cat: Cat, pile: Pile): Cell[] | null {
+    const grid = this.state.grid
+    if (grid.isNeighbour(cat.cell, pile.cell)) return []
+
+    const spots = grid.neighbours(pile.cell)
+    spots.sort((a, b) => {
+      const da = octile(cat.cell, a)
+      const db = octile(cat.cell, b)
+      if (da !== db) return da - db
+      return a.y !== b.y ? a.y - b.y : a.x - b.x
+    })
+    for (const spot of spots) {
+      const path = grid.findPath(cat.cell, spot)
+      if (path !== null) return path
     }
+    return null
+  }
+
+  private beginWork(cat: Cat, pile: Pile): void {
     cat.mode = 'work'
     cat.suckAcc = 0
     cat.unitAcc = 0
     cat.status = STATUS.work
+    // Развернуться к куче: иначе пылесос будет работать в пустоту.
+    cat.facing = dirOf(cat.cell, pile.cell) ?? cat.facing
+  }
+
+  private arriveAtPile(cat: Cat): void {
+    const pile = pileById(this.state, cat.target)
+    if (pile === null || pile.volume <= 0 || !this.state.grid.isNeighbour(cat.cell, pile.cell)) {
+      release(this.state, cat)
+      cat.mode = 'idle'
+      return
+    }
+    this.beginWork(cat, pile)
   }
 
   private nearlyDone(pile: Pile): boolean {
@@ -244,7 +276,7 @@ export class Sim {
 
   private work(cat: Cat): void {
     const pile = pileById(this.state, cat.target)
-    if (pile === null || pile.volume <= 0) {
+    if (pile === null || pile.volume <= 0 || !this.state.grid.isNeighbour(cat.cell, pile.cell)) {
       release(this.state, cat)
       cat.mode = 'idle'
       return
@@ -371,7 +403,7 @@ export class Sim {
     }
 
     for (const pile of ranked) {
-      const path = this.state.grid.findPath(cat.cell, pile.cell)
+      const path = this.approach(cat, pile)
       if (path === null) continue
       pile.reservedBy = cat.id
       cat.target = pile.id
@@ -381,8 +413,7 @@ export class Sim {
       cat.suckAcc = 0
       cat.unitAcc = 0
       if (path.length === 0) {
-        cat.mode = 'work'
-        cat.status = STATUS.work
+        this.beginWork(cat, pile)
       } else {
         cat.mode = 'walk'
         cat.status = this.wanted(pile) && this.state.zone !== null ? STATUS.walkZone : STATUS.walk

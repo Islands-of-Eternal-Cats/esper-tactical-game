@@ -39,6 +39,8 @@ function approachAngle(current: number, target: number, rate: number, dt: number
 interface CatObject {
   root: THREE.Group
   body: THREE.Group
+  /** Наклон к работе. Отдельным узлом, чтобы не спорить с рысканьем корпуса. */
+  lean: THREE.Group
   head: THREE.Group
   vacuum: THREE.Mesh
   yaw: number
@@ -50,17 +52,19 @@ function build(): CatObject {
   const root = new THREE.Group()
   const body = new THREE.Group()
   root.add(body)
+  const lean = new THREE.Group()
+  body.add(lean)
 
   const torso = new THREE.Mesh(
     new THREE.CapsuleGeometry(0.26, 0.42, 6, 12),
     new THREE.MeshLambertMaterial({ color: PALETTE.rusty }),
   )
   torso.position.y = 0.47
-  body.add(torso)
+  lean.add(torso)
 
   const head = new THREE.Group()
   head.position.y = 0.92
-  body.add(head)
+  lean.add(head)
 
   const skull = new THREE.Mesh(
     new THREE.SphereGeometry(0.19, 14, 10),
@@ -91,9 +95,9 @@ function build(): CatObject {
     new THREE.MeshLambertMaterial({ color: PALETTE.container }),
   )
   vacuum.position.set(0.2, 0.4, 0.3)
-  body.add(vacuum)
+  lean.add(vacuum)
 
-  return { root, body, head, vacuum, yaw: 0, headYaw: 0, phase: 0 }
+  return { root, body, lean, head, vacuum, yaw: 0, headYaw: 0, phase: 0 }
 }
 
 export class Cats {
@@ -159,26 +163,36 @@ export class Cats {
    */
   private animate(obj: CatObject, view: CatView): void {
     switch (view.action) {
-      case 'work':
-        obj.body.position.y = Math.sin(obj.phase * 9) * 0.025
-        obj.vacuum.position.set(0.16 + Math.sin(obj.phase * 9) * 0.06, 0.3, 0.42)
-        obj.vacuum.rotation.x = -0.35
+      case 'work': {
+        // Движение строится от предмета: ведётся путь пылесоса, корпус идёт
+        // за ним. Медленный широкий взмах — работа; мелкая частая дрожь
+        // читается как тик, а не как дело.
+        const t = obj.phase * 3.2
+        const sweep = Math.sin(t)
+        obj.body.position.y = -0.02 + Math.abs(Math.cos(t)) * 0.025
+        obj.lean.rotation.x = 0.17
+        obj.vacuum.position.set(0.06 + sweep * 0.24, 0.16, 0.54)
+        obj.vacuum.rotation.set(-0.5, sweep * 0.45, 0)
         break
+      }
       case 'dump':
         obj.body.position.y = 0
+        obj.lean.rotation.x = -0.12
         obj.vacuum.position.set(0.05, 0.62, 0.34)
-        obj.vacuum.rotation.x = -1.1
+        obj.vacuum.rotation.set(-1.1, 0, 0)
         break
       case 'walk':
       case 'haul':
         obj.body.position.y = Math.abs(Math.sin(obj.phase * 7)) * 0.045
+        obj.lean.rotation.x = 0.06
         obj.vacuum.position.set(0.2, 0.4, 0.3)
-        obj.vacuum.rotation.x = 0
+        obj.vacuum.rotation.set(0, 0, 0)
         break
       case 'idle':
         obj.body.position.y = Math.sin(obj.phase * 1.6) * 0.012
+        obj.lean.rotation.x = 0
         obj.vacuum.position.set(0.2, 0.4, 0.3)
-        obj.vacuum.rotation.x = 0
+        obj.vacuum.rotation.set(0, 0, 0)
         break
     }
   }

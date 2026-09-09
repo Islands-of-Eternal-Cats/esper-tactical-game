@@ -61,13 +61,15 @@ describe('клик — намерение, а не маршрут', () => {
   it('кот не бросает почти доубранную кучу', () => {
     const sim = new Sim(3)
     // Ждём момент, когда он работает и кучи осталось меньше порога.
+    // Кот работает, стоя рядом с кучей, поэтому кучу опознаём по вниманию.
     const snap = until(sim, (s) => {
       const c = s.cats[0]!
-      if (c.action !== 'work') return false
-      const pile = s.piles.find((p) => p.cell.x === c.cell.x && p.cell.y === c.cell.y)
+      if (c.action !== 'work' || c.lookAt === null) return false
+      const pile = s.piles.find((p) => p.cell.x === c.lookAt!.x && p.cell.y === c.lookAt!.y)
       return pile !== undefined && pile.volume <= NEARLY_DONE_UNITS && pile.volume > 0.2
     })
-    const held = snap.piles.find((p) => p.cell.x === cat(snap).cell.x && p.cell.y === cat(snap).cell.y)!
+    const at = cat(snap).lookAt!
+    const held = snap.piles.find((p) => p.cell.x === at.x && p.cell.y === at.y)!
 
     // Приоритет в дальний угол, заведомо вне этой кучи.
     const far = held.cell.x < 10 ? { x: 18, y: 18 } : { x: 1, y: 1 }
@@ -135,8 +137,10 @@ describe('клик — намерение, а не маршрут', () => {
       const c = s.cats[0]!
       return c.action === 'work' && c.status === 'убирает мусор'
     })
-    const c = working.cats[0]!
-    expect((c.cell.x - 4) ** 2 + (c.cell.y - 4) ** 2).toBeLessThanOrEqual(25)
+    // Проверяем кучу, а не кота: сам он стоит на соседней клетке и вполне
+    // может оказаться на шаг за границей зоны.
+    const at = working.cats[0]!.lookAt!
+    expect((at.x - 4) ** 2 + (at.y - 4) ** 2).toBeLessThanOrEqual(25)
   })
 })
 
@@ -152,6 +156,22 @@ describe('объяснимость', () => {
   it('внимание направлено на то, чем кот занят', () => {
     const sim = new Sim(9)
     const working = until(sim, (s) => s.cats[0]!.action === 'work')
-    expect(cat(working).lookAt).toEqual(cat(working).cell)
+    const c = cat(working)
+    const at = c.lookAt!
+    expect(working.piles.some((p) => p.cell.x === at.x && p.cell.y === at.y)).toBe(true)
+    // Рядом, а не поверх: иначе кот закрывает собой то, что убирает.
+    expect(at).not.toEqual(c.cell)
+    expect(Math.max(Math.abs(at.x - c.cell.x), Math.abs(at.y - c.cell.y))).toBe(1)
+  })
+
+  it('кот никогда не работает, стоя на куче', () => {
+    const sim = new Sim(4)
+    for (let i = 0; i < 30000; i++) {
+      const c = sim.snapshot().cats[0]!
+      if (c.action === 'work') {
+        expect(c.lookAt).not.toEqual(c.cell)
+      }
+      sim.tick()
+    }
   })
 })

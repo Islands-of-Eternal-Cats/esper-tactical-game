@@ -119,6 +119,28 @@ export class Grid {
     return true
   }
 
+  /** Соседние проходимые клетки в фиксированном порядке обхода. */
+  neighbours(cell: Cell): Cell[] {
+    const out: Cell[] = []
+    for (const o of OFFSETS) {
+      if (this.canStep(cell.x, cell.y, o)) out.push({ x: cell.x + o.dx, y: cell.y + o.dy })
+    }
+    return out
+  }
+
+  /**
+   * Достижима ли `b` из `a` одним шагом. Диагональ через угол между двумя
+   * стенами не считается соседством: иначе кот дотянулся бы сквозь стену.
+   */
+  isNeighbour(a: Cell, b: Cell): boolean {
+    const dx = b.x - a.x
+    const dy = b.y - a.y
+    for (const o of OFFSETS) {
+      if (o.dx === dx && o.dy === dy) return this.canStep(a.x, a.y, o)
+    }
+    return false
+  }
+
   /**
    * Путь от `from` до `to`, не включая `from` и включая `to`.
    * `[]` — уже на месте. `null` — пути нет.
