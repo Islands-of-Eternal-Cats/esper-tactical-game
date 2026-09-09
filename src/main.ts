@@ -31,9 +31,8 @@ const hud = new Hud(hudRoot, {
     send({ t: 'setSpeed', speed: s })
     hud.setSpeed(s)
   },
-  onReset: () => {
-    // Сид виден и воспроизводим: тот же сид даёт тот же двор.
-    send({ t: 'reset', seed: (Date.now() >>> 0) % 100000 })
+  onReset: (seed) => {
+    send({ t: 'reset', seed })
   },
 })
 hud.setSpeed(speed)
@@ -42,10 +41,18 @@ worker.onmessage = (e: MessageEvent<WorkerMessage>): void => {
   const msg = e.data
   if (msg.t === 'world') {
     world = msg.world
-    scene = new SceneView(canvas, world, {
-      onIntent: (cell) => send({ t: 'setZone', cell, radius: DEFAULT_ZONE_RADIUS }),
-      onClearIntent: () => send({ t: 'clearZone' }),
-    })
+    snapshot = null
+    // Сцена создаётся один раз: второй рендерер на том же холсте получил бы
+    // тот же контекст, а обработчики ввода навесились бы повторно.
+    if (scene === null) {
+      scene = new SceneView(canvas, world, {
+        onIntent: (cell) => send({ t: 'setZone', cell, radius: DEFAULT_ZONE_RADIUS }),
+        onClearIntent: () => send({ t: 'clearZone' }),
+      })
+    } else {
+      scene.setWorld(world)
+    }
+    hud.setSeed(world.seed)
     return
   }
   snapshot = msg.snap

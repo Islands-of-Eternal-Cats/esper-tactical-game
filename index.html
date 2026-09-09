@@ -48,7 +48,18 @@
       .bar > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .18s linear; }
       .totals { margin-top: 8px; font-size: 12px; color: var(--dim); font-variant-numeric: tabular-nums; }
 
-      .controls { display: flex; gap: 6px; }
+      .controls, .seeds { display: flex; gap: 6px; align-items: center; }
+      .seeds label {
+        font-size: 11px; letter-spacing: .12em; text-transform: uppercase;
+        color: var(--dim);
+      }
+      .seeds input {
+        width: 84px; padding: 7px 9px;
+        font: inherit; font-size: 12px; font-variant-numeric: tabular-nums;
+        color: var(--ink); background: #12151b;
+        border: 1px solid var(--line); border-radius: 6px;
+      }
+      .seeds input:focus { outline: none; border-color: var(--accent); }
       button {
         min-width: 42px; padding: 7px 10px;
         font: inherit; font-size: 12px; color: var(--ink);
@@ -57,7 +68,6 @@
       }
       button:hover { border-color: #3d4757; }
       button.on { border-color: var(--accent); color: var(--accent); }
-      button.wide { min-width: 0; margin-left: 6px; color: var(--dim); }
 
       .hint { font-size: 11px; color: #5d6675; max-width: 420px; }
     </style>

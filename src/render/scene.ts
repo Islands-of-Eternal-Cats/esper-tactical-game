@@ -24,8 +24,9 @@ export class SceneView {
   private readonly renderer: THREE.WebGLRenderer
   private readonly scene = new THREE.Scene()
   private readonly view = new IsoCamera()
-  private readonly kit: Kit
-  private readonly cats: Cats
+  private world: WorldView
+  private kit: Kit
+  private cats: Cats
   private contextLost = false
 
   private pointerId: number | null = null
@@ -37,9 +38,10 @@ export class SceneView {
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
-    private readonly world: WorldView,
+    world: WorldView,
     handlers: SceneHandlers,
   ) {
+    this.world = world
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true })
     // Выше двух гнать нечего: плоская заливка от этого не выигрывает.
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
@@ -131,6 +133,21 @@ export class SceneView {
     const ndcY = -((clientY - r.top) / r.height) * 2 + 1
     const hit = this.view.groundAt(ndcX, ndcY)
     return hit === null ? null : worldToCell(hit, this.world)
+  }
+
+  /**
+   * Новый двор на прежнем холсте.
+   *
+   * Пересоздавать SceneView нельзя: второй WebGLRenderer на том же холсте
+   * получил бы тот же контекст, а обработчики ввода навесились бы повторно —
+   * один клик слал бы столько команд, сколько было сбросов.
+   */
+  setWorld(world: WorldView): void {
+    this.world = world
+    this.kit.dispose()
+    this.cats.dispose()
+    this.kit = new Kit(this.scene, world)
+    this.cats = new Cats(this.scene, world)
   }
 
   resize(): void {

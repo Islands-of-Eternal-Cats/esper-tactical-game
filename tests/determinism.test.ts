@@ -59,6 +59,29 @@ describe('детерминизм', () => {
   })
 })
 
+describe('двор из сида', () => {
+  it('один сид — один двор', () => {
+    const layout = (seed: number): string => JSON.stringify(new Sim(seed).snapshot().piles)
+    expect(layout(12345)).toBe(layout(12345))
+    expect(layout(12345)).not.toBe(layout(12346))
+  })
+
+  it('сид виден снаружи — иначе воспроизводимостью нельзя воспользоваться', () => {
+    expect(new Sim(777).world().seed).toBe(777)
+  })
+
+  it('двор не зависит от того, что происходило до сброса', () => {
+    const fresh = JSON.stringify(new Sim(42).snapshot().piles)
+    const used = new Sim(9)
+    for (let i = 0; i < 2000; i++) used.tick()
+    used.setZone({ x: 5, y: 5 }, 4)
+    used.reset(42)
+    expect(JSON.stringify(used.snapshot().piles)).toBe(fresh)
+    expect(used.snapshot().zone).toBeNull()
+    expect(used.snapshot().tick).toBe(0)
+  })
+})
+
 describe('сохранение', () => {
   it('загрузка не позволяет перебросить зафиксированный исход', () => {
     const sim = new Sim(5)

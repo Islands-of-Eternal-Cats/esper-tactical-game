@@ -9,7 +9,7 @@
 
 import * as THREE from 'three'
 import type { CatView, Dir, Snapshot, WorldView } from '../shared/protocol'
-import { cellToWorld } from './kit'
+import { cellToWorld, disposeTree } from './kit'
 import { PALETTE } from './palette'
 
 /** Направление взгляда в плоскости земли. y растёт на юг. */
@@ -101,6 +101,7 @@ function build(): CatObject {
 }
 
 export class Cats {
+  private readonly root = new THREE.Group()
   private readonly objects = new Map<string, CatObject>()
   private readonly a = new THREE.Vector3()
   private readonly b = new THREE.Vector3()
@@ -108,7 +109,15 @@ export class Cats {
   constructor(
     private readonly scene: THREE.Scene,
     private readonly world: WorldView,
-  ) {}
+  ) {
+    scene.add(this.root)
+  }
+
+  dispose(): void {
+    this.scene.remove(this.root)
+    disposeTree(this.root)
+    this.objects.clear()
+  }
 
   /** `dt` — реальное время кадра, умноженное на множитель скорости. */
   sync(snap: Snapshot, dt: number): void {
@@ -117,7 +126,7 @@ export class Cats {
       if (obj === undefined) {
         obj = build()
         this.objects.set(view.id, obj)
-        this.scene.add(obj.root)
+        this.root.add(obj.root)
       }
       this.place(obj, view, dt)
     }

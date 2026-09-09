@@ -9,7 +9,12 @@ import type { Snapshot, Speed } from '../shared/protocol'
 
 export interface HudHandlers {
   onSpeed: (speed: Speed) => void
-  onReset: () => void
+  onReset: (seed: number) => void
+}
+
+/** Пять цифр: такой сид можно продиктовать вслух и записать на бумажке. */
+function randomSeed(): number {
+  return Math.floor(Math.random() * 100000)
 }
 
 const SPEEDS: ReadonlyArray<{ value: Speed; label: string }> = [
@@ -35,6 +40,7 @@ export class Hud {
   private readonly load: HTMLElement
   private readonly totals: HTMLElement
   private readonly buttons = new Map<Speed, HTMLButtonElement>()
+  private readonly seed: HTMLInputElement
   private current: Speed = 1
   /** Куда пробел возвращает из паузы: последняя ненулевая скорость. */
   private resume: Speed = 1
@@ -68,15 +74,37 @@ export class Hud {
       controls.appendChild(b)
       this.buttons.set(value, b)
     }
-    const reset = document.createElement('button')
-    reset.textContent = 'заново'
-    reset.className = 'wide'
-    reset.addEventListener('click', () => {
-      reset.blur()
-      handlers.onReset()
-    })
-    controls.appendChild(reset)
     root.appendChild(controls)
+
+    // Сид виден и вводится руками: двор воспроизводим по построению, но пока
+    // сид не показан, воспользоваться этим нельзя. Тот же сид — тот же двор.
+    const seeds = document.createElement('div')
+    seeds.className = 'seeds'
+    seeds.innerHTML = '<label for="seed">сид</label><input id="seed" type="text" inputmode="numeric" autocomplete="off" spellcheck="false">'
+    this.seed = seeds.querySelector('input')!
+
+    const again = document.createElement('button')
+    again.textContent = 'заново'
+    again.addEventListener('click', () => {
+      again.blur()
+      handlers.onReset(this.enteredSeed())
+    })
+    seeds.appendChild(again)
+
+    const other = document.createElement('button')
+    other.textContent = 'случайный'
+    other.addEventListener('click', () => {
+      other.blur()
+      handlers.onReset(randomSeed())
+    })
+    seeds.appendChild(other)
+
+    this.seed.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return
+      this.seed.blur()
+      handlers.onReset(this.enteredSeed())
+    })
+    root.appendChild(seeds)
 
     const hint = document.createElement('div')
     hint.className = 'hint'
@@ -88,6 +116,17 @@ export class Hud {
     this.bindKeys(handlers)
   }
 
+  /** Что набрано в поле. Мусор превращается в ноль, а не в тихий отказ. */
+  private enteredSeed(): number {
+    const value = Number.parseInt(this.seed.value.trim(), 10)
+    if (!Number.isFinite(value) || value < 0) return 0
+    return Math.min(value, 0xffffffff)
+  }
+
+  setSeed(seed: number): void {
+    this.seed.value = String(seed)
+  }
+
   /**
    * Клавиатура вместо мыши: в срезе игрок смотрит на кота, а не на панель.
    * Пробел — переключатель, а не «поставить на паузу»: он возвращает ту
@@ -96,6 +135,9 @@ export class Hud {
   private bindKeys(handlers: HudHandlers): void {
     window.addEventListener('keydown', (e) => {
       if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return
+      // Иначе «1» в поле сида переключала бы скорость вместо ввода цифры.
+      const target = e.target
+      if (target instanceof HTMLElement && (target.tagName === 'INPUT' || target.isContentEditable)) return
 
       if (e.code === 'Space' || e.key === ' ') {
         // Иначе пробел прокрутит страницу и нажмёт кнопку под фокусом.

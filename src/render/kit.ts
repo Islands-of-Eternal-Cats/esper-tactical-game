@@ -110,7 +110,28 @@ function buildShell(cells: readonly Cell[], world: WorldView): THREE.BufferGeome
   return geometry
 }
 
+/**
+ * Освобождает поддерево. Материалы собираются в множество: они общие между
+ * объектами, и освобождать их в обходе как попало значит освободить дважды.
+ */
+export function disposeTree(root: THREE.Object3D): void {
+  const materials = new Set<THREE.Material>()
+  root.traverse((object) => {
+    const node = object as THREE.Object3D & {
+      geometry?: THREE.BufferGeometry
+      material?: THREE.Material | THREE.Material[]
+    }
+    node.geometry?.dispose()
+    const material = node.material
+    if (Array.isArray(material)) for (const m of material) materials.add(m)
+    else if (material !== undefined) materials.add(material)
+  })
+  for (const material of materials) material.dispose()
+}
+
 export class Kit {
+  /** Всё своё — в одной группе: двор пересоздаётся на каждый новый сид. */
+  private readonly root = new THREE.Group()
   private readonly wallMatrices: THREE.Matrix4[] = []
   private readonly wallIndexByCell = new Map<number, number>()
   /** Номер сплошного блока для каждой стенной клетки. Гаснет блок целиком. */
@@ -140,14 +161,14 @@ export class Kit {
       new THREE.MeshLambertMaterial({ color: PALETTE.floor }),
     )
     slab.position.y = -0.2
-    scene.add(slab)
+    this.root.add(slab)
 
     const skirt = new THREE.Mesh(
       new THREE.BoxGeometry(width + 0.6, 0.24, height + 0.6),
       new THREE.MeshLambertMaterial({ color: PALETTE.floorEdge }),
     )
     skirt.position.y = -0.42
-    scene.add(skirt)
+    this.root.add(skirt)
 
     // Стены живут двумя наборами на одной геометрии: сплошной и гаснущий.
     // Инстанс переезжает между ними, когда закрывает собой кота.
@@ -166,7 +187,7 @@ export class Kit {
       new THREE.MeshLambertMaterial({ color: PALETTE.wall }),
       Math.max(1, world.walls.length),
     )
-    scene.add(this.wallsSolid)
+    this.root.add(this.wallsSolid)
 
     const ghostMaterial = new THREE.MeshLambertMaterial({
       color: PALETTE.wall,
@@ -198,7 +219,7 @@ export class Kit {
       shell.add(edges)
 
       this.ghostShells.push(shell)
-      scene.add(shell)
+      this.root.add(shell)
     }
 
     const container = new THREE.Mesh(
@@ -207,7 +228,7 @@ export class Kit {
     )
     cellToWorld(world.container, world, v)
     container.position.set(v.x, 0.52, v.z)
-    scene.add(container)
+    this.root.add(container)
 
     this.piles = new THREE.InstancedMesh(
       new THREE.BoxGeometry(0.3, 0.24, 0.3),
@@ -215,7 +236,7 @@ export class Kit {
       MAX_PILES * CHUNKS,
     )
     this.piles.count = 0
-    scene.add(this.piles)
+    this.root.add(this.piles)
 
     // Зона приоритета: намерение игрока, а не маршрут. Тёплый янтарь —
     // красный зарезервирован под угрозу.
@@ -232,8 +253,10 @@ export class Kit {
       mesh.position.y = 0.02
       mesh.visible = false
       mesh.renderOrder = 1
-      scene.add(mesh)
+      this.root.add(mesh)
     }
+
+    scene.add(this.root)
   }
 
   sync(snap: Snapshot): void {
@@ -366,6 +389,7 @@ export class Kit {
   }
 
   dispose(): void {
-    this.scene.clear()
+    this.scene.remove(this.root)
+    disposeTree(this.root)
   }
 }
