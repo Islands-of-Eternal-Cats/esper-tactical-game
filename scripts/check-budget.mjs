@@ -21,7 +21,9 @@ function walk(dir) {
   return out
 }
 
-const files = walk('dist').filter((f) => /\.(js|css|html)$/.test(f))
+// Модели входят в начальную загрузку наравне с кодом: их вес уползает так же
+// незаметно, а в бюджете техплана они отдельная строка.
+const files = walk('dist').filter((f) => /\.(js|css|html|glb)$/.test(f))
 let total = 0
 const rows = []
 for (const f of files) {

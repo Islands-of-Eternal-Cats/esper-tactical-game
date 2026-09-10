@@ -8,6 +8,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build && node scripts/check-budget.mjs",
     "preview": "vite preview",
+    "assets": "/Applications/Blender.app/Contents/MacOS/Blender --background --python assets/build-character-kit.py",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint .",
@@ -17,6 +18,7 @@
     "three": "^0.180.0"
   },
   "devDependencies": {
+    "@types/node": "^22.20.2",
     "@types/three": "^0.180.0",
     "eslint": "^9.0.0",
     "typescript": "^5.6.0",
