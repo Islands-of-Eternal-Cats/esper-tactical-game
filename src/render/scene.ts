@@ -9,6 +9,7 @@ import * as THREE from 'three'
 import type { Cell, Snapshot, WorldView } from '../shared/protocol'
 import { IsoCamera } from './camera'
 import { Cats } from './cats'
+import { CatKit } from './model'
 import { Kit, worldToCell } from './kit'
 import { PALETTE } from './palette'
 
@@ -28,6 +29,8 @@ export class SceneView {
   private kit: Kit
   private cats: Cats
   private contextLost = false
+  /** Кит переживает пересборку двора: грузить его на каждый сид незачем. */
+  private catKit: CatKit | null = null
 
   private pointerId: number | null = null
   private startX = 0
@@ -58,6 +61,7 @@ export class SceneView {
 
     this.kit = new Kit(this.scene, world)
     this.cats = new Cats(this.scene, world)
+    if (this.catKit !== null) this.cats.setKit(this.catKit)
     this.view.lookAtCentre(0, 0)
 
     // Мобильные браузеры убивают контекст при сворачивании.
@@ -68,6 +72,16 @@ export class SceneView {
     canvas.addEventListener('webglcontextrestored', () => {
       this.contextLost = false
     })
+
+    // Кит грузится в фоне: до него сцена уже работает на капсуле, а падение
+    // загрузки не должно уносить с собой всю игру.
+    void CatKit.load().then(
+      (kit) => {
+        this.catKit = kit
+        this.cats.setKit(kit)
+      },
+      (err: unknown) => console.warn('кит персонажей не загрузился, остаёмся на капсуле', err),
+    )
 
     this.bindPointer(handlers)
     this.resize()
@@ -148,6 +162,7 @@ export class SceneView {
     this.cats.dispose()
     this.kit = new Kit(this.scene, world)
     this.cats = new Cats(this.scene, world)
+    if (this.catKit !== null) this.cats.setKit(this.catKit)
   }
 
   resize(): void {
