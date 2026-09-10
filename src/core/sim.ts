@@ -138,9 +138,12 @@ export class Sim {
         case 'walk':
         case 'survey':
           // Ничего не вложено — переприцеливается сразу.
+          // Маршрут отменяется весь, кроме начатого шага: цель должна
+          // смениться в тот же тик, но возвращать кота в центр покинутой
+          // клетки нельзя — на экране это рывок назад.
           release(this.state, cat)
           cat.mode = 'idle'
-          cat.path = []
+          cat.path = this.stepInFlight(cat)
           cat.status = STATUS.walkZone
           break
         case 'haul':
@@ -196,6 +199,37 @@ export class Sim {
     }
   }
 
+  /**
+   * Клетка, из которой строится новый маршрут.
+   *
+   * Кот, застигнутый приказом посреди шага, доходит до клетки, в которую уже
+   * ступил. Иначе маршрут считается от покинутой клетки, а кот на экране
+   * прыгает в её центр — рывок назад на каждый клик игрока.
+   */
+  private origin(cat: Cat): Cell {
+    const step = cat.path[0]
+    return cat.progress > 0 && step !== undefined ? step : cat.cell
+  }
+
+  /** Начатый шаг: то единственное из маршрута, что переживает новый приказ. */
+  private stepInFlight(cat: Cat): Cell[] {
+    const step = cat.path[0]
+    return cat.progress > 0 && step !== undefined ? [step] : []
+  }
+
+  /** Назначить маршрут, не отменяя начатый шаг. */
+  private setPath(cat: Cat, path: Cell[]): void {
+    const step = cat.path[0]
+    if (cat.progress > 0 && step !== undefined) {
+      // Прогресс и накопитель шага остаются: шаг продолжается, а не начинается.
+      cat.path = [step, ...path]
+      return
+    }
+    cat.path = path
+    cat.progress = 0
+    cat.moveAcc = 0
+  }
+
   /** Продвижение по пути. `true` — путь пройден. */
   private advance(cat: Cat): boolean {
     if (cat.path.length === 0) return true
@@ -235,17 +269,18 @@ export class Sim {
    */
   private approach(cat: Cat, pile: Pile): Cell[] | null {
     const grid = this.state.grid
-    if (grid.isNeighbour(cat.cell, pile.cell)) return []
+    const from = this.origin(cat)
+    if (grid.isNeighbour(from, pile.cell)) return []
 
     const spots = grid.neighbours(pile.cell)
     spots.sort((a, b) => {
-      const da = octile(cat.cell, a)
-      const db = octile(cat.cell, b)
+      const da = octile(from, a)
+      const db = octile(from, b)
       if (da !== db) return da - db
       return a.y !== b.y ? a.y - b.y : a.x - b.x
     })
     for (const spot of spots) {
-      const path = grid.findPath(cat.cell, spot)
+      const path = grid.findPath(from, spot)
       if (path !== null) return path
     }
     return null
@@ -345,18 +380,17 @@ export class Sim {
 
   private beginHaul(cat: Cat, status: string): void {
     release(this.state, cat)
-    const path = this.state.grid.findPath(cat.cell, this.state.container)
+    const path = this.state.grid.findPath(this.origin(cat), this.state.container)
     if (path === null) {
       cat.mode = 'idle'
       cat.status = STATUS.stuck
       return
     }
-    cat.path = path
-    cat.progress = 0
-    cat.moveAcc = 0
-    cat.mode = path.length === 0 ? 'dump' : 'haul'
+    this.setPath(cat, path)
+    const arrived = cat.path.length === 0
+    cat.mode = arrived ? 'dump' : 'haul'
     cat.waitMs = DUMP_MS
-    cat.status = path.length === 0 ? STATUS.dump : status
+    cat.status = arrived ? STATUS.dump : status
   }
 
   private beginSurvey(cat: Cat): void {
@@ -365,7 +399,7 @@ export class Sim {
       cat.mode = 'idle'
       return
     }
-    const path = this.state.grid.findPath(cat.cell, zone.cell)
+    const path = this.state.grid.findPath(this.origin(cat), zone.cell)
     if (path === null) {
       // До центра зоны не дойти — приоритет молча снимается, иначе кот
       // застрянет в намерении, которое нельзя исполнить.
@@ -373,17 +407,14 @@ export class Sim {
       cat.mode = 'idle'
       return
     }
-    cat.path = path
-    cat.progress = 0
-    cat.moveAcc = 0
+    this.setPath(cat, path)
     cat.mode = 'survey'
     cat.waitMs = SURVEY_MS
-    cat.status = path.length === 0 ? STATUS.survey : STATUS.walkZone
+    cat.status = cat.path.length === 0 ? STATUS.survey : STATUS.walkZone
   }
 
   private assign(cat: Cat): void {
     cat.reconsider = false
-    cat.path = []
 
     if (cat.load >= cat.capacity) {
       this.beginHaul(cat, STATUS.haulFull)
@@ -403,6 +434,7 @@ export class Sim {
         return
       }
       cat.status = STATUS.empty
+      this.setPath(cat, [])
       return
     }
 
@@ -411,12 +443,10 @@ export class Sim {
       if (path === null) continue
       pile.reservedBy = cat.id
       cat.target = pile.id
-      cat.path = path
-      cat.progress = 0
-      cat.moveAcc = 0
+      this.setPath(cat, path)
       cat.suckAcc = 0
       cat.unitAcc = 0
-      if (path.length === 0) {
+      if (cat.path.length === 0) {
         this.beginWork(cat, pile)
       } else {
         cat.mode = 'walk'

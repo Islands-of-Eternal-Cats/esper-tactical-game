@@ -14,6 +14,21 @@ function cat(snap: Snapshot): CatView {
   return snap.cats[0]!
 }
 
+/** Экранное положение кота: то, что видит игрок, а не клетка состояния. */
+function place(view: CatView): { x: number; y: number } {
+  if (view.next === null) return { x: view.cell.x, y: view.cell.y }
+  return {
+    x: view.cell.x + (view.next.x - view.cell.x) * view.progress,
+    y: view.cell.y + (view.next.y - view.cell.y) * view.progress,
+  }
+}
+
+function octile(a: { x: number; y: number }, b: { x: number; y: number }): number {
+  const dx = Math.abs(a.x - b.x)
+  const dy = Math.abs(a.y - b.y)
+  return Math.max(dx, dy) + (Math.SQRT2 - 1) * Math.min(dx, dy)
+}
+
 /** Крутит симуляцию, пока не выполнится условие. Возвращает снапшот. */
 function until(sim: Sim, pred: (s: Snapshot) => boolean, limit = 20000): Snapshot {
   for (let i = 0; i < limit; i++) {
@@ -111,6 +126,27 @@ describe('клик — намерение, а не маршрут', () => {
     const after = sim.snapshot()
     // Цель сменилась в том же тике, ничего доканчивать не нужно.
     expect(after.cats[0]!.lookAt).not.toEqual(wasTarget)
+  })
+
+  it('приказ посреди шага не дёргает кота назад', () => {
+    const sim = new Sim(3)
+    // Именно посреди шага: приказ в момент, когда кот стоит в центре клетки,
+    // ничего сдвинуть и не мог бы.
+    const walking = until(
+      sim,
+      (s) => s.cats[0]!.action === 'walk' && s.cats[0]!.progress > 0.3 && s.cats[0]!.next !== null,
+    )
+    const before = place(cat(walking))
+
+    const far = sim.snapshot().piles
+      .slice()
+      .sort((a, b) => octile(b.cell, cat(walking).cell) - octile(a.cell, cat(walking).cell))[0]!
+    sim.setZone(far.cell, 2)
+
+    const moved = place(cat(sim.snapshot()))
+    expect(Math.hypot(moved.x - before.x, moved.y - before.y)).toBeCloseTo(0, 6)
+    // Начатый шаг не отменён: кот доходит до клетки, в которую уже ступил.
+    expect(cat(sim.snapshot()).next).toEqual(walking.cats[0]!.next)
   })
 
   it('в пустой зоне кот доходит, осматривается и возвращается к своему порядку', () => {
