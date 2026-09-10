@@ -201,6 +201,10 @@ export class Sim {
     if (cat.path.length === 0) return true
 
     const next = cat.path[0]!
+    // Направление — туда, куда кот идёт, а не откуда пришёл. Если ставить его
+    // по факту прихода в клетку, кот целую клетку едет к цели боком и только
+    // потом доворачивается: на капсуле это незаметно, на модели — сразу видно.
+    cat.facing = dirOf(cat.cell, next) ?? cat.facing
     const msPerCell = (WALK_MS_PER_CELL * stepCost(cat.cell, next)) / ORTHO
     const [amount, acc] = tickAmount(cat.moveAcc, msPerCell)
     cat.moveAcc = acc
@@ -208,9 +212,9 @@ export class Sim {
 
     while (cat.progress >= UNIT && cat.path.length > 0) {
       cat.progress -= UNIT
-      const step = cat.path.shift()!
-      cat.facing = dirOf(cat.cell, step) ?? cat.facing
-      cat.cell = step
+      cat.cell = cat.path.shift()!
+      const ahead = cat.path[0]
+      if (ahead !== undefined) cat.facing = dirOf(cat.cell, ahead) ?? cat.facing
     }
 
     if (cat.path.length === 0) {
