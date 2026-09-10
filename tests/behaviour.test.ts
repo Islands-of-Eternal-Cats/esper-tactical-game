@@ -149,6 +149,20 @@ describe('клик — намерение, а не маршрут', () => {
     expect(cat(sim.snapshot()).next).toEqual(walking.cats[0]!.next)
   })
 
+  it('к пустой зоне кот идёт, а не летит в позе покоя', () => {
+    const sim = new Sim(3)
+    until(sim, (s) => s.cats[0]!.action === 'walk')
+    const snap = sim.snapshot()
+
+    // Зона в углу, подальше от всякого мусора: коту остаётся только дойти.
+    const empty = { x: 1, y: 1 }
+    expect(snap.piles.some((p) => Math.abs(p.cell.x - empty.x) <= 2 && Math.abs(p.cell.y - empty.y) <= 2)).toBe(false)
+    sim.setZone(empty, 2)
+
+    const going = until(sim, (s) => s.cats[0]!.next !== null && s.cats[0]!.progress > 0)
+    expect(cat(going).action).toBe('walk')
+  })
+
   it('в пустой зоне кот доходит, осматривается и возвращается к своему порядку', () => {
     const sim = new Sim(3)
     // Угол двора, где мусора заведомо нет: рядом с контейнером чисто.

@@ -495,7 +495,10 @@ export class Sim {
         // Единственное место, где фиксированная точка становится float.
         progress: c.progress / UNIT,
         facing: c.facing,
-        action: c.mode === 'survey' ? 'idle' : c.mode,
+        // Осмотр — это два разных дела под одним режимом: сначала дойти до
+        // зоны, потом стоять и осматриваться. Пока путь не пройден, кот
+        // идёт — иначе он летит к зоне неподвижно, в позе покоя.
+        action: c.mode === 'survey' ? (c.path.length > 0 ? 'walk' : 'idle') : c.mode,
         lookAt: this.lookAt(c),
         status: c.status,
         load: c.load / UNIT,
