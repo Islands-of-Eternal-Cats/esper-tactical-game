@@ -64,6 +64,13 @@ export class CatKit {
   }
 }
 
+/** Клип по имени из контракта. Отсутствие — поломка ассета, а не вариант. */
+export function clip(rig: CatRig, name: string): THREE.AnimationClip {
+  const found = rig.clips.find((c) => c.name === name)
+  if (found === undefined) throw new Error(`в ките нет клипа ${name}`)
+  return found
+}
+
 /** Кость по имени из контракта. Отсутствие — поломка ассета, а не вариант. */
 export function bone(rig: CatRig, name: string): THREE.Bone {
   const found = rig.bones.get(name) ?? rig.bones.get(sanitize(name))

@@ -4,19 +4,27 @@
  * Капсула остаётся не как временный код, а как честная деградация: сцена
  * должна работать, пока кит летит по сети, и если он не долетел вовсе.
  *
- * Клипов в ките пока нет, движение процедурное — но правило микшера уже
- * действует: `dt` здесь всегда реальное время кадра, умноженное на множитель
- * скорости, и никогда не дельта из аккумулятора симуляции.
+ * Движение модели — клипы из кита через `AnimationMixer`; капсула остаётся
+ * процедурной, ей клипы неоткуда взять. Правило микшера: `dt` здесь всегда
+ * реальное время кадра, умноженное на множитель скорости, и никогда не дельта
+ * из аккумулятора симуляции — иначе анимация живёт в другом времени, чем
+ * картинка, и на паузе или ускорении это сразу видно.
  */
 
 import * as THREE from 'three'
 import type { CatView, Dir, Snapshot, WorldView } from '../shared/protocol'
-import { bone, type CatKit, type CatRig } from './model'
+import { bone, clip, type CatKit, type CatRig } from './model'
 import { cellToWorld, disposeTree } from './kit'
 import { PALETTE } from './palette'
 
 /** Части, которые показывает Ржавый. Кит несёт и чужие — они гасятся. */
 const RUSTY_PARTS = ['head_rusty', 'body_stocky', 'gear_vacuum', 'held_vacuum'] as const
+
+/**
+ * Клипы кита, по одному на занятие. Имена — контракт с ассетом, он проверяется
+ * автотестом `tests/character-kit.test.ts`; отсутствие клипа — поломка кита.
+ */
+const ACTIONS: readonly CatView['action'][] = ['idle', 'walk', 'haul', 'work', 'dump']
 
 /** Направление взгляда в плоскости земли. y растёт на юг. */
 const HEADING: Record<Dir, [number, number]> = {
@@ -54,48 +62,56 @@ interface Figure {
   setYaw(yaw: number): void
   /** Поворот головы относительно корпуса: на что он смотрит. */
   setHeadYaw(offset: number): void
-  pose(action: CatView['action'], phase: number): void
+  /** Продвинуть движение на кадр. `dt` — то же время, что у поворотов. */
+  animate(action: CatView['action'], dt: number): void
 }
 
 // --------------------------------------------------------------------------
 // Модель
 // --------------------------------------------------------------------------
 
-const BONES = [
-  'mixamorig:Hips', 'mixamorig:Spine1', 'mixamorig:Head',
-  'mixamorig:LeftArm', 'mixamorig:RightArm',
-  'mixamorig:LeftForeArm', 'mixamorig:RightForeArm',
-  'mixamorig:LeftUpLeg', 'mixamorig:RightUpLeg',
-  'mixamorig:LeftLeg', 'mixamorig:RightLeg',
-  'tail_1', 'tail_2', 'tail_3',
-] as const
-
-type BoneName = (typeof BONES)[number]
+/**
+ * Смена клипа — кроссфейд, а не подмена кадром: кот меняет занятие за четверть
+ * секунды, и на этом стыке он не должен дёргаться. Длиннее — и он выглядит
+ * вялым, короче — щёлкает.
+ */
+const FADE = 0.22
 
 class ModelFigure implements Figure {
   readonly root = new THREE.Group()
   private readonly body = new THREE.Group()
-  private readonly bones = new Map<BoneName, THREE.Bone>()
-  /** Bind-поза: любое движение задаётся смещением от неё, а не поверх кадра. */
-  private readonly base = new Map<BoneName, THREE.Quaternion>()
+  private readonly mixer: THREE.AnimationMixer
+  private readonly clips = new Map<CatView['action'], THREE.AnimationAction>()
+  private readonly head: THREE.Bone
+  /** Bind-поза головы: рысканье задаётся смещением от неё, а не поверх кадра. */
+  private readonly headBase: THREE.Quaternion
   private readonly q = new THREE.Quaternion()
   private readonly e = new THREE.Euler()
+  private playing: CatView['action'] | null = null
 
   constructor(rig: CatRig) {
     this.root.add(this.body)
     this.body.add(rig.root)
-    for (const name of BONES) {
-      const b = bone(rig, name)
-      this.bones.set(name, b)
-      this.base.set(name, b.quaternion.clone())
+
+    this.mixer = new THREE.AnimationMixer(rig.root)
+    for (const name of ACTIONS) {
+      const action = this.mixer.clipAction(clip(rig, name))
+      action.setLoop(THREE.LoopRepeat, Infinity)
+      this.clips.set(name, action)
     }
+
+    this.head = bone(rig, 'mixamorig:Head')
+    this.headBase = this.head.quaternion.clone()
   }
 
   /**
    * Геометрия и материалы приехали из кита и общие на всех котов: освободить
-   * их здесь — значит стереть модель у остальных и у будущих.
+   * их здесь — значит стереть модель у остальных и у будущих. Клипы тоже
+   * общие, но привязки микшера — свои, и их надо снять.
    */
   dispose(): void {
+    this.mixer.stopAllAction()
+    this.mixer.uncacheRoot(this.mixer.getRoot())
     this.root.removeFromParent()
   }
 
@@ -104,89 +120,24 @@ class ModelFigure implements Figure {
   }
 
   setHeadYaw(offset: number): void {
-    // Кость головы смотрит вдоль своей оси Y, поэтому рысканье — поворот
-    // вокруг неё же.
-    this.turn('mixamorig:Head', 0, offset, 0)
+    // Клипы кость головы не трогают именно затем, чтобы взгляд остался за
+    // рантаймом: иначе трек затирал бы внимание кота каждый кадр.
+    this.head.quaternion.copy(this.headBase).multiply(
+      this.q.setFromEuler(this.e.set(0, offset, 0)),
+    )
   }
 
-  /** Поворот кости от bind-позы. Углы — в её собственных осях. */
-  private turn(name: BoneName, x: number, y: number, z: number): void {
-    const b = this.bones.get(name)
-    const base = this.base.get(name)
-    if (b === undefined || base === undefined) return
-    b.quaternion.copy(base).multiply(this.q.setFromEuler(this.e.set(x, y, z)))
-  }
-
-  pose(action: CatView['action'], phase: number): void {
-    // Хвост живёт всегда: синус с отставанием по звеньям. В humanoid-ригах
-    // хвоста нет, и это единственное, что делает кота котом в покое.
-    const sway = action === 'idle' ? 0.9 : 2.6
-    for (const [i, name] of (['tail_1', 'tail_2', 'tail_3'] as const).entries()) {
-      const t = phase * sway - i * 0.7
-      this.turn(name, Math.sin(t) * 0.10, 0, Math.cos(t * 0.7) * 0.14)
-    }
-
-    switch (action) {
-      case 'walk':
-      case 'haul': {
-        const t = phase * 7
-        this.body.position.y = Math.abs(Math.sin(t)) * 0.04
-        this.turn('mixamorig:Spine1', 0.06, 0, 0)
-        this.stride(t, 0.5, 0.35)
-        break
-      }
-      case 'work': {
-        // Движение строится от предмета: ведётся путь пылесоса, а раструб
-        // сидит в сокете ладони — значит достаточно вести руку. Взмах
-        // медленный и широкий: мелкая частая дрожь читается как тик.
-        const t = phase * 3.2
-        const sweep = Math.sin(t)
-        this.body.position.y = 0
-        this.turn('mixamorig:Spine1', 0.24, sweep * 0.16, 0)
-        this.turn('mixamorig:RightArm', -0.55, 0, sweep * 0.5)
-        this.turn('mixamorig:RightForeArm', -0.45, 0, 0)
-        this.turn('mixamorig:LeftArm', -0.2, 0, 0)
-        this.turn('mixamorig:LeftForeArm', -0.3, 0, 0)
-        this.stride(0, 0, 0)
-        break
-      }
-      case 'dump': {
-        this.body.position.y = 0
-        this.turn('mixamorig:Spine1', -0.16, 0, 0)
-        this.turn('mixamorig:RightArm', 1.2, 0, 0)
-        this.turn('mixamorig:RightForeArm', 0.5, 0, 0)
-        this.turn('mixamorig:LeftArm', 0.3, 0, 0)
-        this.turn('mixamorig:LeftForeArm', 0, 0, 0)
-        this.stride(0, 0, 0)
-        break
-      }
-      case 'idle': {
-        const t = phase * 1.6
-        this.body.position.y = Math.sin(t) * 0.012
-        this.turn('mixamorig:Spine1', Math.sin(t) * 0.03, 0, 0)
-        this.turn('mixamorig:RightArm', 0, 0, 0)
-        this.turn('mixamorig:RightForeArm', -0.1, 0, 0)
-        this.turn('mixamorig:LeftArm', 0, 0, 0)
-        this.turn('mixamorig:LeftForeArm', -0.1, 0, 0)
-        this.stride(0, 0, 0)
-        break
+  animate(action: CatView['action'], dt: number): void {
+    if (action !== this.playing) {
+      const next = this.clips.get(action)
+      if (next !== undefined) {
+        const prev = this.playing === null ? undefined : this.clips.get(this.playing)
+        next.reset().play()
+        if (prev !== undefined) next.crossFadeFrom(prev, FADE, true)
+        this.playing = action
       }
     }
-  }
-
-  /** Шаг: ноги в противофазе, руки — навстречу своим ногам. */
-  private stride(t: number, legs: number, arms: number): void {
-    const swing = Math.sin(t)
-    this.turn('mixamorig:LeftUpLeg', swing * legs, 0, 0)
-    this.turn('mixamorig:RightUpLeg', -swing * legs, 0, 0)
-    this.turn('mixamorig:LeftLeg', Math.max(0, -swing) * legs * 0.9, 0, 0)
-    this.turn('mixamorig:RightLeg', Math.max(0, swing) * legs * 0.9, 0, 0)
-    if (arms > 0) {
-      this.turn('mixamorig:LeftArm', -swing * arms, 0, 0)
-      this.turn('mixamorig:RightArm', swing * arms, 0, 0)
-      this.turn('mixamorig:LeftForeArm', -0.2, 0, 0)
-      this.turn('mixamorig:RightForeArm', -0.2, 0, 0)
-    }
+    this.mixer.update(dt)
   }
 }
 
@@ -200,6 +151,8 @@ class StandInFigure implements Figure {
   private readonly lean = new THREE.Group()
   private readonly head = new THREE.Group()
   private readonly vacuum: THREE.Mesh
+  /** Своё время: у капсулы нет микшера, её движение считается от фазы. */
+  private phase = 0
 
   constructor() {
     this.root.add(this.body)
@@ -249,7 +202,9 @@ class StandInFigure implements Figure {
     this.head.rotation.y = offset
   }
 
-  pose(action: CatView['action'], phase: number): void {
+  animate(action: CatView['action'], dt: number): void {
+    this.phase += dt
+    const phase = this.phase
     switch (action) {
       case 'work': {
         const t = phase * 3.2
@@ -287,7 +242,6 @@ interface CatObject {
   figure: Figure
   yaw: number
   headYaw: number
-  phase: number
 }
 
 export class Cats {
@@ -305,8 +259,9 @@ export class Cats {
   }
 
   /**
-   * Кит приехал. Фигуры пересобираются на месте: углы и фаза переносятся,
-   * поэтому подмена не выглядит рывком, а кот не телепортируется.
+   * Кит приехал. Фигуры пересобираются на месте: углы переносятся, поэтому
+   * подмена не выглядит рывком, а кот не телепортируется. Фаза капсулы
+   * теряется вместе с капсулой — клип всё равно начинается со своего начала.
    */
   setKit(kit: CatKit): void {
     this.kit = kit
@@ -332,7 +287,7 @@ export class Cats {
     for (const view of snap.cats) {
       let obj = this.objects.get(view.id)
       if (obj === undefined) {
-        obj = { figure: this.build(), yaw: 0, headYaw: 0, phase: 0 }
+        obj = { figure: this.build(), yaw: 0, headYaw: 0 }
         this.objects.set(view.id, obj)
         this.root.add(obj.figure.root)
       }
@@ -369,9 +324,8 @@ export class Cats {
     offset = Math.max(-HEAD_LIMIT, Math.min(HEAD_LIMIT, offset))
     obj.headYaw = approachAngle(obj.headYaw, offset, HEAD_RATE, dt)
 
-    obj.phase += dt
-    obj.figure.pose(view.action, obj.phase)
-    // После позы: она трогает те же кости и иначе затрёт поворот головы.
+    obj.figure.animate(view.action, dt)
+    // После анимации: микшер трогает те же кости и иначе затрёт поворот головы.
     obj.figure.setHeadYaw(obj.headYaw)
   }
 }

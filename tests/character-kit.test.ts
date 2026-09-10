@@ -13,10 +13,15 @@ import { fileURLToPath } from 'node:url'
 const GLB = fileURLToPath(new URL('../public/models/character-kit.glb', import.meta.url))
 
 interface Gltf {
+  animations?: {
+    name: string
+    channels: { sampler: number; target: { node: number; path: string } }[]
+    samplers: { input: number }[]
+  }[]
   meshes: { name: string; primitives: { indices: number }[] }[]
   nodes: { name: string; mesh?: number; skin?: number; children?: number[] }[]
   skins: { name: string; joints: number[] }[]
-  accessors: { count: number }[]
+  accessors: { count: number; min?: number[]; max?: number[] }[]
   images?: unknown[]
 }
 
@@ -95,6 +100,30 @@ describe('character-kit.glb', () => {
   it('сохраняет имена Mixamo, иначе клипы не ретаргетятся', () => {
     for (const bone of ['Hips', 'Spine1', 'Head', 'RightHand', 'LeftFoot']) {
       expect(index.has(`mixamorig:${bone}`), `нет кости ${bone}`).toBe(true)
+    }
+  })
+
+  it('несёт клип на каждое занятие кота', () => {
+    const clips = new Map((json.animations ?? []).map((a) => [a.name, a]))
+    for (const name of ['idle', 'walk', 'haul', 'work', 'dump']) {
+      const anim = clips.get(name)
+      expect(anim, `нет клипа ${name}`).toBeDefined()
+      if (anim === undefined) continue
+      // Клип начинается с нуля и длится хоть сколько-то: полусекундный
+      // огрызок в начале при зацикливании читается запинкой.
+      const t = json.accessors[anim.samplers[0]!.input]
+      expect(t?.min?.[0]).toBe(0)
+      expect(t?.max?.[0] ?? 0).toBeGreaterThan(0.5)
+    }
+  })
+
+  it('оставляет голову рантайму: взгляд не запечён в клипы', () => {
+    // Рысканье головы — внимание кота, им управляет рендер. Трек на этой
+    // кости затирал бы взгляд каждый кадр, и починка была бы неочевидной.
+    const head = nodeIndex('mixamorig:Head')
+    for (const anim of json.animations ?? []) {
+      const targets = anim.channels.map((c) => c.target.node)
+      expect(targets, `клип ${anim.name} трогает голову`).not.toContain(head)
     }
   })
 

@@ -26,7 +26,7 @@ import os
 import sys
 
 import bpy
-from mathutils import Euler, Matrix, Vector
+from mathutils import Euler, Matrix, Quaternion, Vector
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BLEND = os.path.join(ROOT, "assets", "rusty.blend")
@@ -241,9 +241,288 @@ def socket(obj, rig, bone, where, tilt=(0.0, 0.0, 0.0)):
     obj.matrix_world = Matrix.Translation(Vector(where)) @ Euler(tilt).to_matrix().to_4x4()
 
 
+# --------------------------------------------------------------------------
+# Клипы. Ключевые позы, а не синус: контакт и пронос ставятся руками, между
+# ними интерполирует Blender. Синус в рантайме давал ровный поплавок без
+# опоры на землю, и никакими коэффициентами это не лечится.
+#
+# Позы задаются поворотами вокруг МИРОВЫХ осей (X вправо, -Y вперёд, Z вверх)
+# и переводятся в базис кости: думать в осях кости, которая смотрит вниз и с
+# произвольным roll, нельзя — ошибка знака там неотличима от ошибки позы.
+# --------------------------------------------------------------------------
+
+FPS = 30
+X, Y, Z = (1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)
+
+
+def to_bone(pb, turns):
+    """Список поворотов вокруг мировых осей → кватернион в базисе кости.
+
+    Порядок применения — как записан: следующий поворот идёт поверх
+    предыдущих, вокруг мировой оси, а не унесённой предыдущим поворотом.
+    """
+    q = Quaternion((1.0, 0.0, 0.0, 0.0))
+    for axis, angle in turns:
+        q = Quaternion(axis, angle) @ q
+    m = pb.bone.matrix_local.to_quaternion()
+    return m.inverted() @ q @ m
+
+
+def tail(side, lift, gain=1.0):
+    """Хвост: одна волна с отставанием по звеньям. Живёт во всех клипах."""
+    return {
+        "tail_1": [(Z, side * 0.16 * gain), (X, lift * 0.10)],
+        "tail_2": [(Z, side * 0.22 * gain), (X, lift * 0.16)],
+        "tail_3": [(Z, side * 0.26 * gain), (X, lift * 0.22)],
+    }
+
+
+def leg(side, hip, knee, ankle):
+    """Нога одной стороны. Вперёд — отрицательный поворот вокруг X."""
+    return {
+        RIG + side + "UpLeg": [(X, hip)],
+        RIG + side + "Leg": [(X, knee)],
+        RIG + side + "Foot": [(X, ankle)],
+    }
+
+
+def arm(side, swing, elbow):
+    return {
+        RIG + side + "Arm": [(X, swing)],
+        RIG + side + "ForeArm": [(X, elbow)],
+    }
+
+
+def spine(lean, twist=0.0, rise=0.0):
+    """Корпус: наклон вперёд, скрутка плеч и подъём таза.
+
+    Таз двигается смещением кости, а не всей фигуры: позицию кота в мире
+    ведёт код, и root motion в клипе с ней воевал бы.
+    """
+    return {
+        RIG + "Hips": [(Z, -twist)],
+        RIG + "Spine": [(X, lean * 0.45)],
+        RIG + "Spine1": [(X, lean * 0.55), (Z, twist * 1.4)],
+        # Голову клипы не трогают: её рысканье — внимание кота, им управляет
+        # рантайм, и трек в клипе затирал бы взгляд.
+        RIG + "Neck": [(X, -lean * 0.8)],
+        "@rise": rise,
+    }
+
+
+def merge(*parts):
+    out = {}
+    for p in parts:
+        out.update(p)
+    return out
+
+
+# --- походка ---------------------------------------------------------------
+
+def contact(front, p):
+    """Контакт: передняя нога встала на пятку, задняя доталкивает."""
+    back = "Right" if front == "Left" else "Left"
+    sign = 1.0 if front == "Left" else -1.0
+    return merge(
+        spine(p["lean"], twist=-0.09 * sign, rise=-p["bob"]),
+        leg(front, -p["stride"], 0.10, 0.12),
+        leg(back, p["stride"] * 0.75, p["stride"] * 1.05, -0.22),
+        arm(front, p["arms"], -0.30),
+        arm(back, -p["arms"], -0.45),
+        tail(sign, 0.0, p["tail"]),
+    )
+
+
+def passing(front, p):
+    """Пронос: опорная нога под тазом, свободная идёт вперёд с высоким коленом."""
+    back = "Right" if front == "Left" else "Left"
+    sign = 1.0 if front == "Left" else -1.0
+    return merge(
+        spine(p["lean"] * 1.15, twist=0.0, rise=p["bob"]),
+        leg(front, -p["stride"] * 0.12, 0.08, -0.06),
+        leg(back, -p["stride"] * 0.45, p["stride"] * 1.35, -0.10),
+        arm(front, p["arms"] * 0.35, -0.34),
+        arm(back, -p["arms"] * 0.35, -0.40),
+        tail(sign * 0.3, 0.25, p["tail"]),
+    )
+
+
+def gait(p):
+    """Цикл шага: контакт — пронос — зеркало — зеркало. Последний кадр = первый."""
+    step = p["step"]
+    keys = [
+        (1, contact("Left", p)),
+        (1 + step, passing("Left", p)),
+        (1 + step * 2, contact("Right", p)),
+        (1 + step * 3, passing("Right", p)),
+        (1 + step * 4, contact("Left", p)),
+    ]
+    if p.get("hold_right"):
+        # Правая лапа держит раструб: махать ей нельзя, иначе пропс летает.
+        for _, pose in keys:
+            pose.update(arm("Right", -0.42, -0.75))
+    return keys
+
+
+WALK = {"stride": 0.52, "arms": 0.34, "lean": 0.10, "bob": 0.022, "tail": 1.0, "step": 6}
+HAUL = {"stride": 0.38, "arms": 0.16, "lean": 0.26, "bob": 0.030, "tail": 0.35,
+        "step": 8, "hold_right": True}
+
+
+# --- работа и разгрузка ----------------------------------------------------
+
+def vacuum(sweep, dip):
+    """Взмах пылесосом. Ведётся рука: раструб сидит в сокете ладони.
+
+    Медленно и широко: частая мелкая дрожь читается не работой, а тиком.
+    """
+    return merge(
+        spine(0.30, twist=sweep * 0.20, rise=-0.02 - dip),
+        {
+            # Взмах — вокруг вертикали: рука уже вынесена вперёд, и поворот
+            # вокруг Y (оси «вперёд») её не разводит в стороны, а закручивает.
+            RIG + "RightArm": [(X, -0.80), (Z, sweep * 0.60)],
+            RIG + "RightForeArm": [(X, -0.50)],
+            RIG + "LeftArm": [(X, -0.30), (Z, -0.14)],
+            RIG + "LeftForeArm": [(X, -0.55)],
+        },
+        leg("Left", -0.16, 0.26, 0.06),
+        leg("Right", -0.16, 0.26, 0.06),
+        tail(-sweep, -0.2, 0.8),
+    )
+
+
+def WORK():
+    return [
+        (1, vacuum(-1.0, 0.0)),
+        (13, vacuum(0.0, 0.012)),
+        (25, vacuum(1.0, 0.0)),
+        (37, vacuum(0.0, 0.012)),
+        (49, vacuum(-1.0, 0.0)),
+    ]
+
+
+def dumping(t):
+    """Разгрузка: присесть, поднять раструб над контейнером, наклонить, вернуть."""
+    return merge(
+        spine(0.22 - t * 0.42, rise=-0.05 + t * 0.05),
+        {
+            RIG + "RightArm": [(X, -0.35 - t * 1.05)],
+            RIG + "RightForeArm": [(X, -0.55 - t * 0.35)],
+            RIG + "LeftArm": [(X, -0.20 - t * 0.35)],
+            RIG + "LeftForeArm": [(X, -0.40)],
+        },
+        leg("Left", -0.30 + t * 0.22, 0.40 - t * 0.30, 0.10),
+        leg("Right", -0.30 + t * 0.22, 0.40 - t * 0.30, 0.10),
+        tail(0.0, -0.6 + t * 1.2, 1.0),
+    )
+
+
+def DUMP():
+    return [(1, dumping(0.0)), (16, dumping(0.75)), (31, dumping(1.0)),
+            (46, dumping(0.45)), (61, dumping(0.0))]
+
+
+# --- покой -----------------------------------------------------------------
+
+def breathing(t, side, ear):
+    """Покой: дыхание, перенос веса и живой хвост. Кот не статуя и не дрожит."""
+    return merge(
+        spine(0.03 + t * 0.035, twist=side * 0.03, rise=t * 0.010),
+        arm("Left", 0.0, -0.16),
+        arm("Right", 0.0, -0.16),
+        leg("Left", -0.05, 0.09, 0.02),
+        leg("Right", -0.05, 0.09, 0.02),
+        tail(side, 0.15 + t * 0.2, 1.0),
+        {"ear_l": [(X, ear)], "ear_r": [(X, ear * 0.6)]},
+    )
+
+
+def IDLE():
+    return [(1, breathing(0.0, 1.0, 0.0)), (25, breathing(1.0, 0.4, 0.0)),
+            (49, breathing(0.0, -1.0, -0.22)), (61, breathing(0.4, -0.7, 0.0)),
+            (73, breathing(1.0, -0.2, 0.0)), (97, breathing(0.0, 1.0, 0.0))]
+
+
+CLIPS = [("idle", IDLE), ("walk", lambda: gait(WALK)), ("haul", lambda: gait(HAUL)),
+         ("work", WORK), ("dump", DUMP)]
+
+
+def fcurves_of(act):
+    """Кривые экшена. С Blender 4.4 они лежат в слоях и мешках каналов слота,
+    а не прямо в экшене, и старого пути `act.fcurves` больше нет."""
+    if hasattr(act, "fcurves"):
+        return list(act.fcurves)
+    out = []
+    for layer in act.layers:
+        for strip in layer.strips:
+            for bag in strip.channelbags:
+                out.extend(bag.fcurves)
+    return out
+
+
+def bake(rig, name, keys):
+    """Экшен из ключевых поз. Ключуются только затронутые кости.
+
+    Иначе в GLB уезжает трек на каждую кость каждого клипа, и кит толстеет
+    вдвое ни на что.
+    """
+    touched = sorted({b for _, pose in keys for b in pose if not b.startswith("@")})
+    act = bpy.data.actions.new(name)
+    ad = rig.animation_data or rig.animation_data_create()
+    ad.action = act
+    if hasattr(ad, "action_slot") and ad.action_slot is None:
+        ad.action_slot = act.slots.new(id_type="OBJECT", name=rig.name)
+
+    hips = rig.pose.bones[RIG + "Hips"]
+    for frame, pose in keys:
+        for pb in rig.pose.bones:
+            pb.rotation_mode = "QUATERNION"
+            pb.rotation_quaternion = Quaternion((1.0, 0.0, 0.0, 0.0))
+            pb.location = Vector((0.0, 0.0, 0.0))
+        for name_b in touched:
+            pb = rig.pose.bones[name_b]
+            pb.rotation_quaternion = to_bone(pb, pose.get(name_b, []))
+        # Подъём таза — в базисе его кости: она смотрит вверх, но полагаться
+        # на это на глаз не стоит.
+        rise = pose.get("@rise", 0.0)
+        m = hips.bone.matrix_local.to_quaternion()
+        hips.location = m.inverted() @ Vector((0.0, 0.0, rise))
+
+        # Ключи со нуля: клип, начатый с кадра 1, в glTF стартует с 0.03 с, и
+        # при зацикливании этот огрызок читается запинкой.
+        for name_b in touched:
+            rig.pose.bones[name_b].keyframe_insert("rotation_quaternion", frame=frame - 1)
+        hips.keyframe_insert("location", frame=frame - 1)
+
+    for fc in fcurves_of(act):
+        for kp in fc.keyframe_points:
+            kp.interpolation = "BEZIER"
+            kp.handle_left_type = kp.handle_right_type = "AUTO_CLAMPED"
+    act.use_cyclic = True
+    act.use_fake_user = True
+    return act, keys[-1][0]
+
+
+def build_clips(rig):
+    """Все клипы — экшенами и полосами NLA: экспортёр берёт их как отдельные."""
+    ad = rig.animation_data or rig.animation_data_create()
+    for name, make in CLIPS:
+        act, last = bake(rig, name, make())
+        track = ad.nla_tracks.new()
+        track.name = name
+        strip = track.strips.new(name, 0, act)
+        strip.action_frame_start, strip.action_frame_end = 0, last - 1
+        track.mute = True
+        print(f"  клип {name}: {last - 1} кадров, {(last - 1) / FPS:.2f} с, "
+              f"{len(fcurves_of(act))} кривых")
+    ad.action = None
+
+
 def main():
     bpy.ops.wm.read_factory_settings(use_empty=True)
     bpy.context.scene.unit_settings.system = "METRIC"
+    bpy.context.scene.render.fps = FPS
 
     m_body = flat_material("rusty_body", RUSTY)
     m_head = flat_material("rusty_head", RUSTY_HEAD)
@@ -269,6 +548,8 @@ def main():
         box((0, 0, 0.15), (0.18, 0.11, 0.05), None),       # крышка
         box((0, -0.03, 0.22), (0.06, 0.06, 0.10), None),   # шланг через плечо
     ], m_gear)
+    build_clips(rig)
+
     socket(held, rig, "socket_hand_r", (-0.28, -0.13, 0.42), (0.35, 0, 0))
     socket(gear, rig, "socket_back", (0, 0.24, 0.66))
 
@@ -286,6 +567,10 @@ def main():
         export_apply=True,
         export_skins=True,
         export_animations=True,
+        export_animation_mode="ACTIONS",
+        export_frame_range=False,
+        export_force_sampling=False,
+        export_optimize_animation_size=False,
         export_draco_mesh_compression_enable=False,
         export_cameras=False,
         export_lights=False,
