@@ -818,11 +818,15 @@ def bake(rig, name, keys):
 
 
 def foot_speed(rig, act, last):
-    """Скорость ног в клипе, ед/с: размах стопы за цикл × 2 шага / длину.
+    """Скорость опорной стопы в клипе, ед/с.
 
     Уезжает в extras клипа: рендер делит на неё скорость земли и получает
-    timeScale, при котором ноги не скользят. Считается по запечённому
-    клипу, а не по параметрам позы — тогда любая правка шага учитывается.
+    timeScale, при котором ноги не скользят. Считается по запечённому клипу,
+    а не по параметрам позы, — любая правка шага учитывается.
+
+    Мерить надо лодыжку и только на опоре: носок в махе описывает дугу шире,
+    чем лодыжка проходит по земле, и размах за цикл завышал скорость на
+    треть — тело обгоняло стопы.
     """
     ad = rig.animation_data
     ad.action = act
@@ -832,9 +836,11 @@ def foot_speed(rig, act, last):
     ys = []
     for f in range(0, last):
         bpy.context.scene.frame_set(f)
-        ys.append((rig.matrix_world @ foot.tail).y)
-    stride = max(ys) - min(ys)
-    return 2.0 * stride / ((last - 1) / FPS)
+        ys.append((rig.matrix_world @ foot.head).y)
+    # Левая нога в контакте на кадре 0, опора — первая половина цикла.
+    stance = (last - 1) // 2
+    travel = sum(abs(ys[i + 1] - ys[i]) for i in range(stance))
+    return travel / (stance / FPS)
 
 
 def build_clips(rig):

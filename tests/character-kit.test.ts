@@ -125,7 +125,7 @@ describe('character-kit.glb', () => {
     for (const name of ['walk', 'haul']) {
       const anim = (json.animations ?? []).find((a) => a.name === name)
       const v = anim?.extras?.foot_speed
-      expect(v, `${name} без foot_speed`).toBeGreaterThan(0.5)
+      expect(v, `${name} без foot_speed`).toBeGreaterThan(0.3)
       expect(v).toBeLessThan(3)
     }
   })
