@@ -524,50 +524,106 @@ def merge(*parts):
 
 
 # --- походка ---------------------------------------------------------------
+#
+# Не четыре позы, а формула по фазе. Контакт — экстремум, и если ставить его
+# ключом, Безье в нём замирает: нога стоит, корпус едет. А на самом деле в
+# контакте опорная нога вращается с постоянной скоростью — стопа прижата к
+# земле, тело проезжает над ней. Поэтому опора линейна, мах — с разгоном,
+# и ключи стоят каждые несколько кадров: стык поз спрятан внутри формулы.
 
-def contact(front, p):
-    """Контакт: передняя нога встала на пятку, задняя доталкивает."""
-    back = "Right" if front == "Left" else "Left"
-    sign = 1.0 if front == "Left" else -1.0
-    return merge(
-        spine(p["lean"], twist=-0.09 * sign, rise=-p["bob"]),
-        leg(front, -p["stride"], 0.10, 0.12),
-        leg(back, p["stride"] * 0.75, p["stride"] * 1.05, -0.22),
-        arm(front, p["arms"], -0.30),
-        arm(back, -p["arms"], -0.45),
-        tail(sign, 0.0, p["tail"]),
+def smooth(t):
+    """Плавный 0→1 без полки на концах: мах ноги разгоняется и тормозит."""
+    return t * t * (3.0 - 2.0 * t)
+
+
+THIGH = L["crotch"] - L["knee"]
+SHIN = L["knee"] - L["ankle"]
+# Постоянный присед в шаге: колени всегда чуть согнуты. Ноги у кота короткие
+# (треть роста), и на прямой ноге стопа до земли на широком шаге не достаёт —
+# IK подтягивает её вверх, и она дёргается у контакта. Заодно так ходят тяжёлые.
+CROUCH = 0.03
+
+
+def leg_ik(fwd, depth):
+    """Углы бедра и колена, чтобы стопа встала в точку: `fwd` вперёд от
+    таза (в -Y), `depth` вниз. Двухзвенная IK по теореме косинусов."""
+    reach = THIGH + SHIN - 1e-3
+    d = min(math.hypot(fwd, depth), reach)
+    cos_hip = (THIGH * THIGH + d * d - SHIN * SHIN) / (2.0 * THIGH * d)
+    cos_knee = (THIGH * THIGH + SHIN * SHIN - d * d) / (2.0 * THIGH * SHIN)
+    alpha = math.acos(max(-1.0, min(1.0, cos_hip)))
+    gamma = math.acos(max(-1.0, min(1.0, cos_knee)))
+    # Вперёд — отрицательный поворот вокруг X; колено гнётся назад — положительный.
+    hip = -(math.atan2(fwd, depth) + alpha)
+    knee = math.pi - gamma
+    return hip, knee
+
+
+def leg_at(phase, front, rise):
+    """Углы ноги по фазе её цикла: 0 — контакт, 0.5 — отрыв.
+
+    Опора — стопа приклеена к земле и едет назад с постоянной скоростью,
+    углы от неё через IK: без этого угол бедра линеен, а стопа — нет
+    (синус), и она подскальзывает к краям опоры. `rise` — подъём таза:
+    нога в контакте короче, в проносе длиннее.
+    """
+    depth = THIGH + SHIN + rise
+    back = front * 0.75
+    if phase < 0.5:
+        t = phase / 0.5
+        hip, knee = leg_ik(front - (front + back) * t, depth)
+        ankle = 0.12 - 0.30 * t
+        return hip, knee, ankle
+    # Мах: от отрыва к контакту с разгоном, колено высоко в середине.
+    # Концы — те же IK-углы, что у опоры, иначе стык виден.
+    t = (phase - 0.5) / 0.5
+    h0, k0 = leg_ik(-back, depth)
+    h1, k1 = leg_ik(front, depth)
+    w = smooth(t)
+    hip = h0 + (h1 - h0) * w
+    knee = k0 + (k1 - k0) * w + front * 4.0 * math.sin(math.pi * t)
+    ankle = -0.18 * math.sin(math.pi * t) + 0.12 * t
+    return hip, knee, ankle
+
+
+def stride_front(p):
+    """Вынос стопы вперёд — константа цикла: не шире, чем нога достаёт в
+    контакте, где таз ниже всего. Пересчёт по фазе ломал бы линейность."""
+    reach = THIGH + SHIN - 2e-3
+    deepest = THIGH + SHIN - CROUCH - p["bob"]
+    limit = math.sqrt(max(0.0, reach * reach - deepest * deepest)) * 0.98
+    return min((THIGH + SHIN) * math.sin(p["stride"]), limit)
+
+
+def stride_at(phase, p):
+    """Поза всего кота в фазе цикла (0..1): левая нога в контакте на 0."""
+    two_pi = 2.0 * math.pi
+    front = stride_front(p)
+    # Руки навстречу своим ногам; таз ниже всего в контакте, выше — в проносе.
+    swing = math.cos(two_pi * phase)
+    rise = -CROUCH - p["bob"] * math.cos(2.0 * two_pi * phase)
+    lh, lk, la = leg_at(phase % 1.0, front, rise)
+    rh, rk, ra = leg_at((phase + 0.5) % 1.0, front, rise)
+    lean = p["lean"] * (1.0 + 0.15 * (1.0 - math.cos(2.0 * two_pi * phase)) / 2.0)
+    pose = merge(
+        spine(lean, twist=-0.09 * swing, rise=rise),
+        leg("Left", lh, lk, la),
+        leg("Right", rh, rk, ra),
+        arm("Left", p["arms"] * swing, -0.30 - 0.10 * abs(swing)),
+        arm("Right", -p["arms"] * swing, -0.30 - 0.10 * abs(swing)),
+        tail(math.sin(two_pi * phase), 0.12 * (1.0 - math.cos(2.0 * two_pi * phase)), p["tail"]),
     )
-
-
-def passing(front, p):
-    """Пронос: опорная нога под тазом, свободная идёт вперёд с высоким коленом."""
-    back = "Right" if front == "Left" else "Left"
-    sign = 1.0 if front == "Left" else -1.0
-    return merge(
-        spine(p["lean"] * 1.15, twist=0.0, rise=p["bob"]),
-        leg(front, -p["stride"] * 0.12, 0.08, -0.06),
-        leg(back, -p["stride"] * 0.45, p["stride"] * 1.35, -0.10),
-        arm(front, p["arms"] * 0.35, -0.34),
-        arm(back, -p["arms"] * 0.35, -0.40),
-        tail(sign * 0.3, 0.25, p["tail"]),
-    )
+    if p.get("hold_right"):
+        # Правая лапа держит раструб: махать ей нельзя, иначе пропс летает.
+        pose.update(arm("Right", -0.42, -0.75))
+    return pose
 
 
 def gait(p):
-    """Цикл шага: контакт — пронос — зеркало — зеркало. Последний кадр = первый."""
-    step = p["step"]
-    keys = [
-        (1, contact("Left", p)),
-        (1 + step, passing("Left", p)),
-        (1 + step * 2, contact("Right", p)),
-        (1 + step * 3, passing("Right", p)),
-        (1 + step * 4, contact("Left", p)),
-    ]
-    if p.get("hold_right"):
-        # Правая лапа держит раструб: махать ей нельзя, иначе пропс летает.
-        for _, pose in keys:
-            pose.update(arm("Right", -0.42, -0.75))
-    return keys
+    """Цикл шага ключами каждые `every` кадров. Последний кадр = первый."""
+    frames = p["step"] * 4
+    every = p["every"]
+    return [(1 + f, stride_at(f / frames, p)) for f in range(0, frames + 1, every)]
 
 
 # Шаг шире, чем «естественный» для этих ног: скорость ног в клипе должна
@@ -576,11 +632,11 @@ def gait(p):
 # они изначально, тем меньше рендеру крутить темп — и тем меньше кот семенит.
 # Цикл 1.2 с — ~100 шагов в минуту: тяжёлый кот, а не котёнок. Быстрее
 # 0.8 с он семенил при том же размахе.
-WALK = {"stride": 0.70, "arms": 0.40, "lean": 0.12, "bob": 0.026, "tail": 1.0, "step": 9}
+WALK = {"stride": 0.70, "arms": 0.40, "lean": 0.12, "bob": 0.026, "tail": 1.0, "step": 9, "every": 1}
 # Тащит кот с той же скоростью земли, что и идёт (симуляция их не
 # различает), поэтому цикл той же длины: иначе рендер удваивал бы темп.
 HAUL = {"stride": 0.60, "arms": 0.18, "lean": 0.26, "bob": 0.032, "tail": 0.35,
-        "step": 9, "hold_right": True}
+        "step": 9, "every": 1, "hold_right": True}
 
 
 # --- работа и разгрузка ----------------------------------------------------
