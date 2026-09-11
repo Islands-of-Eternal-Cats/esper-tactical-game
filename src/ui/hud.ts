@@ -19,20 +19,24 @@ function randomSeed(): number {
 
 const SPEEDS: ReadonlyArray<{ value: Speed; label: string }> = [
   { value: 0, label: '❙❙' },
+  { value: 0.1, label: '×0.1' },
+  { value: 0.5, label: '×0.5' },
   { value: 1, label: '×1' },
   { value: 3, label: '×3' },
 ]
 
 /**
- * Клавиша → скорость. Двойка — вторая кнопка на панели, а не множитель:
- * клавиатура и панель должны говорить одно и то же.
+ * Клавиша → скорость. Цифры идут по кнопкам панели слева направо, а не по
+ * множителю: клавиатура и панель должны говорить одно и то же.
  *
  * Сверяем и `code`, и `key`: первый не зависит от раскладки и потому главный,
  * второй выручает там, где события приходят синтетическими и `code` пуст.
  */
 const KEY_SPEED: ReadonlyArray<{ codes: readonly string[]; keys: readonly string[]; speed: Speed }> = [
-  { codes: ['Digit1', 'Numpad1'], keys: ['1'], speed: 1 },
-  { codes: ['Digit2', 'Numpad2'], keys: ['2'], speed: 3 },
+  { codes: ['Digit1', 'Numpad1'], keys: ['1'], speed: 0.1 },
+  { codes: ['Digit2', 'Numpad2'], keys: ['2'], speed: 0.5 },
+  { codes: ['Digit3', 'Numpad3'], keys: ['3'], speed: 1 },
+  { codes: ['Digit4', 'Numpad4'], keys: ['4'], speed: 3 },
 ]
 
 export class Hud {
@@ -110,7 +114,7 @@ export class Hud {
     hint.className = 'hint'
     hint.innerHTML =
       'клик по земле — где важнее · правая кнопка — снять приоритет · колесо — зум · тянуть — панорама' +
-      '<br>пробел — пауза и обратно на прежнюю скорость · 1 — ×1 · 2 — ×3'
+      '<br>пробел — пауза и обратно на прежнюю скорость · 1–4 — ×0.1 · ×0.5 · ×1 · ×3'
     root.appendChild(hint)
 
     this.bindKeys(handlers)

@@ -70,6 +70,11 @@ export interface SaveState {
   }>
 }
 
+/** Длительность шага в модельных мс: диагональ дороже прямого. */
+function stepMs(from: Cell, to: Cell): number {
+  return (WALK_MS_PER_CELL * stepCost(from, to)) / ORTHO
+}
+
 export class Sim {
   private state: State
 
@@ -239,8 +244,7 @@ export class Sim {
     // по факту прихода в клетку, кот целую клетку едет к цели боком и только
     // потом доворачивается: на капсуле это незаметно, на модели — сразу видно.
     cat.facing = dirOf(cat.cell, next) ?? cat.facing
-    const msPerCell = (WALK_MS_PER_CELL * stepCost(cat.cell, next)) / ORTHO
-    const [amount, acc] = tickAmount(cat.moveAcc, msPerCell)
+    const [amount, acc] = tickAmount(cat.moveAcc, stepMs(cat.cell, next))
     cat.moveAcc = acc
     cat.progress += amount
 
@@ -494,6 +498,7 @@ export class Sim {
         next: c.path.length > 0 ? { ...c.path[0]! } : null,
         // Единственное место, где фиксированная точка становится float.
         progress: c.progress / UNIT,
+        stepMs: c.path.length > 0 ? stepMs(c.cell, c.path[0]!) : 0,
         facing: c.facing,
         // Осмотр — это два разных дела под одним режимом: сначала дойти до
         // зоны, потом стоять и осматриваться. Пока путь не пройден, кот

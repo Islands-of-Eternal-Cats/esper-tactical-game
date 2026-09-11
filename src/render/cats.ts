@@ -38,7 +38,10 @@ const HEADING: Record<Dir, [number, number]> = {
   nw: [-1, -1],
 }
 
-const TURN_RATE = 12
+// Резче, чем у головы: доворот на 45° при выходе на диагональ идёт вместе
+// со стартом шага, и пока корпус вертится, кот читается не идущим, а
+// плывущим. Постоянная времени — 55 мс.
+const TURN_RATE = 18
 const HEAD_RATE = 9
 /** Дальше кот не выворачивает голову — иначе внимание читается как поломка. */
 const HEAD_LIMIT = (110 * Math.PI) / 180
@@ -77,11 +80,22 @@ interface Figure {
  * которой кот уже едет, а ноги ещё в позе покоя. Со стороны это «летит».
  */
 const FADE: Record<CatView['action'], number> = {
-  walk: 0.1,
-  haul: 0.1,
+  walk: 0.06,
+  haul: 0.06,
   idle: 0.22,
   work: 0.22,
   dump: 0.22,
+}
+
+/**
+ * С какой фазы цикла стартует клип. Шаг — с проноса, а не с контакта:
+ * контактная поза почти неотличима от покоя, и до первого видимого движения
+ * ног проходит четверть цикла, за которую кот уже уехал на полклетки.
+ * Пронос — нога в воздухе — читается как ходьба с первого кадра.
+ */
+const START_PHASE: Partial<Record<CatView['action'], number>> = {
+  walk: 0.25,
+  haul: 0.25,
 }
 
 class ModelFigure implements Figure {
@@ -140,6 +154,7 @@ class ModelFigure implements Figure {
       if (next !== undefined) {
         const prev = this.playing === null ? undefined : this.clips.get(this.playing)
         next.reset().play()
+        next.time = (START_PHASE[action] ?? 0) * next.getClip().duration
         // Без warp: он подгоняет скорость нового клипа под длину старого,
         // и шаг после покоя (0.8 с против 3.2 с) стартовал бы вчетверо
         // медленнее — ноги трогаются позже кота. Warp для walk↔run, не сюда.
@@ -292,8 +307,22 @@ export class Cats {
     return this.kit === null ? new StandInFigure() : new ModelFigure(this.kit.spawn(RUSTY_PARTS))
   }
 
+  /** Тик последнего снапшота и модельное время, прошедшее с него. */
+  private seenTick = -1
+  private sinceTick = 0
+
   /** `dt` — реальное время кадра, умноженное на множитель скорости. */
   sync(snap: Snapshot, dt: number): void {
+    // Снапшот приходит раз в тик, а тик — 50 мс модельного времени: на ×0.1
+    // это два раза в секунду. Между снапшотами позиция ведётся вперёд по
+    // тому же закону, по которому её посчитает симуляция, — поэтому в
+    // момент прихода снапшота она уже там, и стыка не видно.
+    if (snap.tick !== this.seenTick) {
+      this.seenTick = snap.tick
+      this.sinceTick = 0
+    } else {
+      this.sinceTick += dt * 1000
+    }
     for (const view of snap.cats) {
       let obj = this.objects.get(view.id)
       if (obj === undefined) {
@@ -307,11 +336,15 @@ export class Cats {
 
   private place(obj: CatObject, view: CatView, dt: number): void {
     // Позиция — линейная интерполяция cell → next по progress. Симуляция
-    // дискретная, картинка непрерывная.
+    // дискретная, картинка непрерывная. Прогресс экстраполируется на время с
+    // последнего тика той же скоростью, что и в симуляции, и упирается в
+    // следующую клетку: что после неё — знает только маршрут.
     cellToWorld(view.cell, this.world, this.a)
     if (view.next !== null) {
       cellToWorld(view.next, this.world, this.b)
-      this.a.lerp(this.b, view.progress)
+      const moving = view.action === 'walk' || view.action === 'haul'
+      const ahead = moving && view.stepMs > 0 ? this.sinceTick / view.stepMs : 0
+      this.a.lerp(this.b, Math.min(1, view.progress + ahead))
     }
     obj.figure.root.position.set(this.a.x, 0, this.a.z)
 
