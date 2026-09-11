@@ -170,6 +170,22 @@ export class Kit {
     skirt.position.y = -0.42
     this.root.add(skirt)
 
+    // Разметка клеток: сетка симуляции видна как есть — шаг, зона, кучи
+    // ложатся ровно на неё, и по ней же читается реальный масштаб кота.
+    const pts: number[] = []
+    for (let x = 0; x <= width; x++) {
+      pts.push(x - width / 2, 0, -height / 2, x - width / 2, 0, height / 2)
+    }
+    for (let y = 0; y <= height; y++) {
+      pts.push(-width / 2, 0, y - height / 2, width / 2, 0, y - height / 2)
+    }
+    const gridGeo = new THREE.BufferGeometry()
+    gridGeo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3))
+    const grid = new THREE.LineSegments(gridGeo, new THREE.LineBasicMaterial({ color: PALETTE.grid }))
+    // Чуть над плитой: на одной высоте линии мерцают в z-буфере.
+    grid.position.y = 0.004
+    this.root.add(grid)
+
     // Стены живут двумя наборами на одной геометрии: сплошной и гаснущий.
     // Инстанс переезжает между ними, когда закрывает собой кота.
     const wallGeo = new THREE.BoxGeometry(1, WALL_H, 1)

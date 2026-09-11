@@ -9,6 +9,8 @@ export const PALETTE = {
   background: 0x14171c,
   floor: 0x2b313a,
   floorEdge: 0x1b1f26,
+  /** Разметка клеток на полу: чуть светлее пола, чтобы читалась, но не спорила. */
+  grid: 0x373e49,
   wall: 0x3b434f,
   wallGhostEdge: 0x93a4ba,
   wallTop: 0x49525f,
