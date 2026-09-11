@@ -681,6 +681,11 @@ def bake(rig, name, keys):
         ad.action_slot = act.slots.new(id_type="OBJECT", name=rig.name)
 
     hips = rig.pose.bones[RIG + "Hips"]
+    # Знак кватерниона на предыдущем ключе той же кости. `q` и `-q` — один
+    # поворот, но Blender интерполирует покомпонентно: если у соседних
+    # ключей знак разошёлся, путь идёт через ноль, и кость делает полный
+    # оборот вместо короткого пути. Ноги на 360° — ровно это.
+    last = {}
     for frame, pose in keys:
         for pb in rig.pose.bones:
             pb.rotation_mode = "QUATERNION"
@@ -688,7 +693,11 @@ def bake(rig, name, keys):
             pb.location = Vector((0.0, 0.0, 0.0))
         for name_b in touched:
             pb = rig.pose.bones[name_b]
-            pb.rotation_quaternion = to_bone(pb, ARM_ADDUCT.get(name_b, []) + pose.get(name_b, []))
+            q = to_bone(pb, ARM_ADDUCT.get(name_b, []) + pose.get(name_b, []))
+            if name_b in last and q.dot(last[name_b]) < 0.0:
+                q.negate()
+            last[name_b] = q.copy()
+            pb.rotation_quaternion = q
         # Подъём таза — в базисе его кости: она смотрит вверх, но полагаться
         # на это на глаз не стоит.
         rise = pose.get("@rise", 0.0)
@@ -775,8 +784,15 @@ def main():
         export_animations=True,
         export_animation_mode="ACTIONS",
         export_frame_range=False,
-        export_force_sampling=False,
-        export_optimize_animation_size=False,
+        # Сэмплировать, а не отдавать кривые Безье: с CUBICSPLINE экспортёр
+        # переподписывает кватернионы между ключами (q и -q), а three в
+        # сплайновом интерполянте кратчайший путь не ищет — нога делала
+        # оборот на 360°. Линейный slerp в three знак учитывает.
+        export_force_sampling=True,
+        export_optimize_animation_size=True,
+        # Сэмплирование пишет трек на каждую кость, включая голову и сокеты;
+        # неанимированные выбрасываются — голова остаётся за рантаймом.
+        export_optimize_animation_keep_anim_armature=False,
         export_draco_mesh_compression_enable=False,
         export_cameras=False,
         export_lights=False,
