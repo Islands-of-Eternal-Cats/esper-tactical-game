@@ -645,9 +645,12 @@ def breathing(t, side, ear):
 
 
 def IDLE():
-    return [(1, breathing(0.0, 1.0, 0.0)), (25, breathing(1.0, 0.4, 0.0)),
-            (49, breathing(0.0, -1.0, -0.22)), (61, breathing(0.4, -0.7, 0.0)),
-            (73, breathing(1.0, -0.2, 0.0)), (97, breathing(0.0, 1.0, 0.0))]
+    """Дыхание и хвост — в противофазе. Если на стыке цикла все каналы разом
+    в экстремуме, кот замирает целиком, и стык виден как пауза; поэтому
+    там, где дыхание на выдохе, хвост проходит через середину и движется."""
+    return [(1, breathing(0.0, 0.0, 0.0)), (25, breathing(1.0, 1.0, 0.0)),
+            (49, breathing(0.0, 0.0, -0.22)), (61, breathing(0.4, -0.6, 0.0)),
+            (73, breathing(1.0, -1.0, 0.0)), (97, breathing(0.0, 0.0, 0.0))]
 
 
 CLIPS = [("idle", IDLE), ("walk", lambda: gait(WALK)), ("haul", lambda: gait(HAUL)),
@@ -665,6 +668,39 @@ def fcurves_of(act):
             for bag in strip.channelbags:
                 out.extend(bag.fcurves)
     return out
+
+
+def cyclic_handles(fc):
+    """Хэндлы Безье с учётом зацикливания.
+
+    У первого и последнего ключа автохэндлы плоские: соседа с одной стороны
+    нет. Скорость на концах клипа падает до нуля, и на стыке цикла кот
+    притормаживает — при ×0.1 это видно. Модификатор Cycles в фоне на
+    расчёт хэндлов не влияет, поэтому соседи подставляются руками: ключи
+    из соседних периодов, хэндлы считаются по ним, фиксируются как FREE, а
+    подставные ключи убираются.
+    """
+    pts = fc.keyframe_points
+    if len(pts) < 3:
+        return
+    for kp in pts:
+        kp.interpolation = "BEZIER"
+        kp.handle_left_type = kp.handle_right_type = "AUTO_CLAMPED"
+    # Координаты — в числа до вставки: ссылки на точки после insert
+    # указывают в сдвинутые слоты массива.
+    period = pts[-1].co.x - pts[0].co.x
+    x_prev, y_prev = pts[-2].co.x - period, pts[-2].co.y
+    x_next, y_next = pts[1].co.x + period, pts[1].co.y
+    pts.insert(x_prev, y_prev)
+    pts.insert(x_next, y_next)
+    fc.update()
+    # После insert точки пересортированы: концы цикла теперь вторая и
+    # предпоследняя.
+    for kp in (pts[1], pts[-2]):
+        kp.handle_left_type = kp.handle_right_type = "FREE"
+    pts.remove(pts[-1])
+    pts.remove(pts[0])
+    fc.update()
 
 
 def bake(rig, name, keys):
@@ -711,9 +747,7 @@ def bake(rig, name, keys):
         hips.keyframe_insert("location", frame=frame - 1)
 
     for fc in fcurves_of(act):
-        for kp in fc.keyframe_points:
-            kp.interpolation = "BEZIER"
-            kp.handle_left_type = kp.handle_right_type = "AUTO_CLAMPED"
+        cyclic_handles(fc)
     act.use_cyclic = True
     act.use_fake_user = True
     return act, keys[-1][0]
