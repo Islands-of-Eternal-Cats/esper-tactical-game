@@ -542,6 +542,8 @@ SHIN = L["knee"] - L["ankle"]
 # (треть роста), и на прямой ноге стопа до земли на широком шаге не достаёт —
 # IK подтягивает её вверх, и она дёргается у контакта. Заодно так ходят тяжёлые.
 CROUCH = 0.03
+# Просвет стопы в махе: подошва ботинка на 2 см ниже кости носка.
+SWING_LIFT = 0.07
 
 
 def leg_ik(fwd, depth):
@@ -569,21 +571,24 @@ def leg_at(phase, front, rise):
     """
     depth = THIGH + SHIN + rise
     back = front * 0.75
+    # Стопа — дочь голени: её наклон в мире = бедро + колено + голеностоп.
+    # В опоре подошва лежит на асфальте плоско, значит голеностоп гасит
+    # наклон ноги целиком; иначе носок уходит в землю, когда голень
+    # наклоняется вперёд к отталкиванию.
     if phase < 0.5:
         t = phase / 0.5
         hip, knee = leg_ik(front - (front + back) * t, depth)
-        ankle = 0.12 - 0.30 * t
-        return hip, knee, ankle
-    # Мах: от отрыва к контакту с разгоном, колено высоко в середине.
-    # Концы — те же IK-углы, что у опоры, иначе стык виден.
+        return hip, knee, -(hip + knee)
+    # Мах — тоже IK, по положению стопы: назад→вперёд с разгоном и дугой
+    # вверх с просветом. По углам мах перед контактом ронял носок под
+    # землю: углы сходились к контакту раньше, чем стопа поднималась.
+    # Носок после отрыва свисает и к контакту снова выравнивается.
     t = (phase - 0.5) / 0.5
-    h0, k0 = leg_ik(-back, depth)
-    h1, k1 = leg_ik(front, depth)
-    w = smooth(t)
-    hip = h0 + (h1 - h0) * w
-    knee = k0 + (k1 - k0) * w + front * 4.0 * math.sin(math.pi * t)
-    ankle = -0.18 * math.sin(math.pi * t) + 0.12 * t
-    return hip, knee, ankle
+    fwd = -back + (front + back) * smooth(t)
+    lift = SWING_LIFT * math.sin(math.pi * t)
+    hip, knee = leg_ik(fwd, depth - lift)
+    pitch = 0.35 * math.sin(math.pi * t) * (1.0 - t)
+    return hip, knee, pitch - (hip + knee)
 
 
 def stride_front(p):
