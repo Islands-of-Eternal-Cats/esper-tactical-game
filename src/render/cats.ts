@@ -66,7 +66,11 @@ interface Figure {
   /** Поворот головы относительно корпуса: на что он смотрит. */
   setHeadYaw(offset: number): void
   /** Продвинуть движение на кадр. `dt` — то же время, что у поворотов. */
-  animate(action: CatView['action'], dt: number): void
+  /**
+   * Продвинуть движение на кадр. `dt` — то же время, что у поворотов;
+   * `speed` — скорость земли под котом, ед/с (0, когда стоит).
+   */
+  animate(action: CatView['action'], dt: number, speed: number): void
 }
 
 // --------------------------------------------------------------------------
@@ -93,6 +97,12 @@ const FADE: Record<CatView['action'], number> = {
  * ног проходит четверть цикла, за которую кот уже уехал на полклетки.
  * Пронос — нога в воздухе — читается как ходьба с первого кадра.
  */
+/** Скорость ног в клипе, ед/с — из extras glTF; у неходячих клипов её нет. */
+function footSpeedOf(clip: THREE.AnimationClip): number | null {
+  const v: unknown = (clip.userData as Record<string, unknown>)['foot_speed']
+  return typeof v === 'number' && v > 0 ? v : null
+}
+
 const START_PHASE: Partial<Record<CatView['action'], number>> = {
   walk: 0.25,
   haul: 0.25,
@@ -148,7 +158,7 @@ class ModelFigure implements Figure {
     )
   }
 
-  animate(action: CatView['action'], dt: number): void {
+  animate(action: CatView['action'], dt: number, speed: number): void {
     if (action !== this.playing) {
       const next = this.clips.get(action)
       if (next !== undefined) {
@@ -161,6 +171,15 @@ class ModelFigure implements Figure {
         if (prev !== undefined) next.crossFadeFrom(prev, FADE[action], false)
         this.playing = action
       }
+    }
+    // Ноги не скользят: темп шага — отношение скорости земли к скорости
+    // ног в клипе (foot_speed запечён в extras при сборке кита). Темп игры
+    // и шаг клипа сведены близко, чтобы тут крутилось на проценты, а не в
+    // разы: при большом множителе кот семенит.
+    const current = this.playing === null ? undefined : this.clips.get(this.playing)
+    if (current !== undefined) {
+      const footSpeed = footSpeedOf(current.getClip())
+      current.timeScale = footSpeed !== null && speed > 0 ? speed / footSpeed : 1
     }
     this.mixer.update(dt)
   }
@@ -228,6 +247,7 @@ class StandInFigure implements Figure {
   }
 
   animate(action: CatView['action'], dt: number): void {
+    // Скорость земли капсуле не нужна: у неё нет ног, чтобы скользить.
     this.phase += dt
     const phase = this.phase
     switch (action) {
@@ -340,10 +360,12 @@ export class Cats {
     // последнего тика той же скоростью, что и в симуляции, и упирается в
     // следующую клетку: что после неё — знает только маршрут.
     cellToWorld(view.cell, this.world, this.a)
+    let speed = 0
     if (view.next !== null) {
       cellToWorld(view.next, this.world, this.b)
       const moving = view.action === 'walk' || view.action === 'haul'
       const ahead = moving && view.stepMs > 0 ? this.sinceTick / view.stepMs : 0
+      if (moving && view.stepMs > 0) speed = this.a.distanceTo(this.b) / (view.stepMs / 1000)
       this.a.lerp(this.b, Math.min(1, view.progress + ahead))
     }
     obj.figure.root.position.set(this.a.x, 0, this.a.z)
@@ -367,7 +389,7 @@ export class Cats {
     offset = Math.max(-HEAD_LIMIT, Math.min(HEAD_LIMIT, offset))
     obj.headYaw = approachAngle(obj.headYaw, offset, HEAD_RATE, dt)
 
-    obj.figure.animate(view.action, dt)
+    obj.figure.animate(view.action, dt, speed)
     // После анимации: микшер трогает те же кости и иначе затрёт поворот головы.
     obj.figure.setHeadYaw(obj.headYaw)
   }

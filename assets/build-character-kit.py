@@ -570,9 +570,17 @@ def gait(p):
     return keys
 
 
-WALK = {"stride": 0.52, "arms": 0.34, "lean": 0.10, "bob": 0.022, "tail": 1.0, "step": 6}
-HAUL = {"stride": 0.38, "arms": 0.16, "lean": 0.26, "bob": 0.030, "tail": 0.35,
-        "step": 8, "hold_right": True}
+# Шаг шире, чем «естественный» для этих ног: скорость ног в клипе должна
+# быть близка к скорости земли (клетка за WALK_MS_PER_CELL), остаток
+# добирает рендер через timeScale по foot_speed из extras клипа. Чем ближе
+# они изначально, тем меньше рендеру крутить темп — и тем меньше кот семенит.
+# Цикл 1.2 с — ~100 шагов в минуту: тяжёлый кот, а не котёнок. Быстрее
+# 0.8 с он семенил при том же размахе.
+WALK = {"stride": 0.70, "arms": 0.40, "lean": 0.12, "bob": 0.026, "tail": 1.0, "step": 9}
+# Тащит кот с той же скоростью земли, что и идёт (симуляция их не
+# различает), поэтому цикл той же длины: иначе рендер удваивал бы темп.
+HAUL = {"stride": 0.60, "arms": 0.18, "lean": 0.26, "bob": 0.032, "tail": 0.35,
+        "step": 9, "hold_right": True}
 
 
 # --- работа и разгрузка ----------------------------------------------------
@@ -753,11 +761,34 @@ def bake(rig, name, keys):
     return act, keys[-1][0]
 
 
+def foot_speed(rig, act, last):
+    """Скорость ног в клипе, ед/с: размах стопы за цикл × 2 шага / длину.
+
+    Уезжает в extras клипа: рендер делит на неё скорость земли и получает
+    timeScale, при котором ноги не скользят. Считается по запечённому
+    клипу, а не по параметрам позы — тогда любая правка шага учитывается.
+    """
+    ad = rig.animation_data
+    ad.action = act
+    if hasattr(ad, "action_slot") and ad.action_slot is None:
+        ad.action_slot = act.slots[0]
+    foot = rig.pose.bones[RIG + "LeftFoot"]
+    ys = []
+    for f in range(0, last):
+        bpy.context.scene.frame_set(f)
+        ys.append((rig.matrix_world @ foot.tail).y)
+    stride = max(ys) - min(ys)
+    return 2.0 * stride / ((last - 1) / FPS)
+
+
 def build_clips(rig):
     """Все клипы — экшенами и полосами NLA: экспортёр берёт их как отдельные."""
     ad = rig.animation_data or rig.animation_data_create()
     for name, make in CLIPS:
         act, last = bake(rig, name, make())
+        if name in ("walk", "haul"):
+            act["foot_speed"] = foot_speed(rig, act, last)
+            print(f"  {name}: ноги {act['foot_speed']:.2f} ед/с")
         track = ad.nla_tracks.new()
         track.name = name
         strip = track.strips.new(name, 0, act)
@@ -816,6 +847,7 @@ def main():
         export_skins=True,
         export_vertex_color="ACTIVE",
         export_animations=True,
+        export_extras=True,
         export_animation_mode="ACTIONS",
         export_frame_range=False,
         # Сэмплировать, а не отдавать кривые Безье: с CUBICSPLINE экспортёр

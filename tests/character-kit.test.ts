@@ -15,6 +15,7 @@ const GLB = fileURLToPath(new URL('../public/models/character-kit.glb', import.m
 interface Gltf {
   animations?: {
     name: string
+    extras?: { foot_speed?: number }
     channels: { sampler: number; target: { node: number; path: string } }[]
     samplers: { input: number }[]
   }[]
@@ -114,6 +115,18 @@ describe('character-kit.glb', () => {
       const t = json.accessors[anim.samplers[0]!.input]
       expect(t?.min?.[0]).toBe(0)
       expect(t?.max?.[0] ?? 0).toBeGreaterThan(0.5)
+    }
+  })
+
+  it('у походок записана скорость ног — по ней рендер гасит скольжение', () => {
+    // Скорость земли задаёт симуляция, скорость ног — клип. Рендер делит
+    // одно на другое и получает темп; без числа в extras он крутил бы клип
+    // вслепую, и ноги скользили бы при любом изменении темпа игры.
+    for (const name of ['walk', 'haul']) {
+      const anim = (json.animations ?? []).find((a) => a.name === name)
+      const v = anim?.extras?.foot_speed
+      expect(v, `${name} без foot_speed`).toBeGreaterThan(0.5)
+      expect(v).toBeLessThan(3)
     }
   })
 
