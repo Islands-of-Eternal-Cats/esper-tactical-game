@@ -71,11 +71,18 @@ interface Figure {
 // --------------------------------------------------------------------------
 
 /**
- * Смена клипа — кроссфейд, а не подмена кадром: кот меняет занятие за четверть
- * секунды, и на этом стыке он не должен дёргаться. Длиннее — и он выглядит
- * вялым, короче — щёлкает.
+ * Смена клипа — кроссфейд, а не подмена кадром: на стыке занятий кот не
+ * должен дёргаться. Но в шаг он входит быстрее, чем в работу: клетка
+ * проходится за 0.4 с, и фейд в четверть секунды — это половина пути, на
+ * которой кот уже едет, а ноги ещё в позе покоя. Со стороны это «летит».
  */
-const FADE = 0.22
+const FADE: Record<CatView['action'], number> = {
+  walk: 0.1,
+  haul: 0.1,
+  idle: 0.22,
+  work: 0.22,
+  dump: 0.22,
+}
 
 class ModelFigure implements Figure {
   readonly root = new THREE.Group()
@@ -133,7 +140,10 @@ class ModelFigure implements Figure {
       if (next !== undefined) {
         const prev = this.playing === null ? undefined : this.clips.get(this.playing)
         next.reset().play()
-        if (prev !== undefined) next.crossFadeFrom(prev, FADE, true)
+        // Без warp: он подгоняет скорость нового клипа под длину старого,
+        // и шаг после покоя (0.8 с против 3.2 с) стартовал бы вчетверо
+        // медленнее — ноги трогаются позже кота. Warp для walk↔run, не сюда.
+        if (prev !== undefined) next.crossFadeFrom(prev, FADE[action], false)
         this.playing = action
       }
     }
