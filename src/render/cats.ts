@@ -16,6 +16,7 @@ import type { CatView, Dir, Snapshot, WorldView } from '../shared/protocol'
 import { bone, clip, type CatKit, type CatRig } from './model'
 import { cellToWorld, disposeTree } from './kit'
 import { PALETTE } from './palette'
+import { smoothAlong } from './path'
 
 /** Части, которые показывает Ржавый. Кит несёт и чужие — они гасятся. */
 const RUSTY_PARTS = ['head_rusty', 'body_stocky', 'gear_vacuum', 'held_vacuum'] as const
@@ -294,6 +295,9 @@ export class Cats {
   private readonly objects = new Map<string, CatObject>()
   private readonly a = new THREE.Vector3()
   private readonly b = new THREE.Vector3()
+  private readonly c = new THREE.Vector3()
+  /** Ломаная маршрута: prev, cell, next, дальше — без аллокаций на кадр. */
+  private readonly route: THREE.Vector3[] = Array.from({ length: 8 }, () => new THREE.Vector3())
   private kit: CatKit | null = null
 
   constructor(
@@ -354,24 +358,52 @@ export class Cats {
     }
   }
 
+  /** Ломаная prev → cell → next → route… в `this.route`; вернёт число точек. */
+  private routePoints(view: CatView): number {
+    let n = 0
+    const push = (cell: { x: number; y: number }): void => {
+      if (n < this.route.length) cellToWorld(cell, this.world, this.route[n++]!)
+    }
+    push(view.prev ?? view.cell)
+    push(view.cell)
+    for (const cell of view.route) push(cell)
+    return n
+  }
+
   private place(obj: CatObject, view: CatView, dt: number): void {
-    // Позиция — линейная интерполяция cell → next по progress. Симуляция
-    // дискретная, картинка непрерывная. Прогресс экстраполируется на время с
-    // последнего тика той же скоростью, что и в симуляции, и упирается в
-    // следующую клетку: что после неё — знает только маршрут.
-    cellToWorld(view.cell, this.world, this.a)
+    // Позиция — вдоль маршрута по прогрессу. Симуляция дискретная, картинка
+    // непрерывная. Прогресс экстраполируется на время с последнего тика той
+    // же скоростью, что и в симуляции, и упирается в следующую клетку.
     let speed = 0
+    let s = 0
     if (view.next !== null) {
+      cellToWorld(view.cell, this.world, this.a)
       cellToWorld(view.next, this.world, this.b)
       const moving = view.action === 'walk' || view.action === 'haul'
       const ahead = moving && view.stepMs > 0 ? this.sinceTick / view.stepMs : 0
       if (moving && view.stepMs > 0) speed = this.a.distanceTo(this.b) / (view.stepMs / 1000)
-      this.a.lerp(this.b, Math.min(1, view.progress + ahead))
+      s = Math.min(1, view.progress + ahead)
     }
+
+    // Лесенка A* сглаживается скользящим средним по маршруту: центры
+    // клеток зигзага лежат по обе стороны прямой, и среднее по окну в
+    // клетку ложится на неё. Симуляция об этом не знает и знать не должна.
+    const n = this.routePoints(view)
+    smoothAlong(this.route, n, 1 + s, this.a)
     obj.figure.root.position.set(this.a.x, 0, this.a.z)
 
-    const [hx, hz] = HEADING[view.facing]
-    obj.yaw = approachAngle(obj.yaw, Math.atan2(hx, hz), TURN_RATE, dt)
+    // Корпус — по касательной к сглаженной кривой, пока кот идёт; иначе на
+    // повороте лесенки он бы дёргался между восемью направлениями.
+    let yawTarget: number
+    if (speed > 0 && n >= 3) {
+      smoothAlong(this.route, n, 1 + s + 0.25, this.b)
+      smoothAlong(this.route, n, 1 + s - 0.25, this.c)
+      yawTarget = Math.atan2(this.b.x - this.c.x, this.b.z - this.c.z)
+    } else {
+      const [hx, hz] = HEADING[view.facing]
+      yawTarget = Math.atan2(hx, hz)
+    }
+    obj.yaw = approachAngle(obj.yaw, yawTarget, TURN_RATE, dt)
     obj.figure.setYaw(obj.yaw)
 
     // Взгляд: кот смотрит на то, чем занят, за секунду до того, как что-то

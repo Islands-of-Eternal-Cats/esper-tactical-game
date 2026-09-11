@@ -70,6 +70,9 @@ export interface SaveState {
   }>
 }
 
+/** Сколько клеток маршрута видит рендер вперёд: на сглаживание хватает трёх. */
+const ROUTE_AHEAD = 4
+
 /** Длительность шага в модельных мс: диагональ дороже прямого. */
 function stepMs(from: Cell, to: Cell): number {
   return (WALK_MS_PER_CELL * stepCost(from, to)) / ORTHO
@@ -89,6 +92,7 @@ export class Sim {
     const cat: Cat = {
       id: 'rusty',
       cell: { x: CONTAINER.x - 2, y: CONTAINER.y },
+      prev: null,
       path: [],
       progress: 0,
       moveAcc: 0,
@@ -250,6 +254,7 @@ export class Sim {
 
     while (cat.progress >= UNIT && cat.path.length > 0) {
       cat.progress -= UNIT
+      cat.prev = cat.cell
       cat.cell = cat.path.shift()!
       const ahead = cat.path[0]
       if (ahead !== undefined) cat.facing = dirOf(cat.cell, ahead) ?? cat.facing
@@ -495,7 +500,9 @@ export class Sim {
       cats: s.cats.map((c) => ({
         id: c.id,
         cell: { ...c.cell },
+        prev: c.prev === null ? null : { ...c.prev },
         next: c.path.length > 0 ? { ...c.path[0]! } : null,
+        route: c.path.slice(0, ROUTE_AHEAD).map((p) => ({ ...p })),
         // Единственное место, где фиксированная точка становится float.
         progress: c.progress / UNIT,
         stepMs: c.path.length > 0 ? stepMs(c.cell, c.path[0]!) : 0,
@@ -634,6 +641,7 @@ export class Sim {
     s.cats = save.cats.map((c) => ({
       id: c.id,
       cell: { x: c.x, y: c.y },
+      prev: null,
       path: c.path.map((p) => ({ ...p })),
       progress: c.progress,
       moveAcc: c.moveAcc,
