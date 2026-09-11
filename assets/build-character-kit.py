@@ -32,12 +32,36 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BLEND = os.path.join(ROOT, "assets", "rusty.blend")
 GLB = os.path.join(ROOT, "public", "models", "character-kit.glb")
 
-# Палитра — та же, что в src/render/palette.ts. Текстур нет ни одной.
+# Палитра — та же, что в src/render/palette.ts. Текстур нет ни одной: кот
+# красится цветом вершин с мокапов, RUSTY — запасной цвет там, куда ни один
+# ракурс не достал.
 RUSTY = (0.76, 0.44, 0.23, 1.0)
-RUSTY_HEAD = (0.85, 0.55, 0.31, 1.0)
 GEAR = (0.21, 0.31, 0.36, 1.0)
 
 RIG = "mixamorig:"
+
+# --------------------------------------------------------------------------
+# Ориентиры. Меш сгенерирован по мокапам (Hunyuan3D, см. assets/gen/), его
+# пропорции — не пропорции болванки: ноги длиннее, плечи выше. Скелет
+# подгоняется под меш, а не наоборот: иначе автовеса тянут колено бедром.
+#
+# Всё в метрах после нормировки: кот от подошвы до кончиков ушей — HEIGHT.
+# --------------------------------------------------------------------------
+
+HEIGHT = 1.20
+
+L = {
+    "ankle": 0.05, "knee": 0.20, "crotch": 0.38, "hips": 0.52,
+    "spine": 0.72, "chest": 0.94, "neck": 1.01, "skull": 1.16,
+    "leg_x": 0.10, "foot_fwd": -0.12,
+    "shoulder_x": 0.20, "shoulder_z": 0.96,
+    "elbow": (0.265, 0.0, 0.74), "wrist": (0.33, 0.0, 0.52), "hand": (0.33, 0.0, 0.47),
+    "tail": [(0.03, 0.09, 0.57), (0.10, 0.12, 0.42), (0.17, 0.14, 0.28), (0.24, 0.16, 0.14)],
+    "ear": ((0.075, 0.0, 1.13), (0.09, 0.0, 1.20)),
+}
+# Граница головы и корпуса: выше — head_rusty, ниже — body_stocky. Чуть выше
+# шеи, чтобы воротник капюшона остался на корпусе.
+HEAD_SPLIT_Z = 1.02
 
 # --------------------------------------------------------------------------
 # Скелет. head → tail, родитель, срастаться ли с родителем.
@@ -62,30 +86,36 @@ def mirrored(name, head, tail, parent, connect):
 
 
 BONES = [
-    (RIG + "Hips", (0, 0, 0.40), (0, 0, 0.54), None, False),
-    (RIG + "Spine", (0, 0, 0.54), (0, 0, 0.68), RIG + "Hips", True),
-    (RIG + "Spine1", (0, 0, 0.68), (0, 0, 0.82), RIG + "Spine", True),
-    (RIG + "Neck", (0, 0, 0.82), (0, 0, 0.88), RIG + "Spine1", True),
-    (RIG + "Head", (0, 0, 0.88), (0, 0, 1.06), RIG + "Neck", True),
+    (RIG + "Hips", (0, 0, L["crotch"]), (0, 0, L["hips"]), None, False),
+    (RIG + "Spine", (0, 0, L["hips"]), (0, 0, L["spine"]), RIG + "Hips", True),
+    (RIG + "Spine1", (0, 0, L["spine"]), (0, 0, L["chest"]), RIG + "Spine", True),
+    (RIG + "Neck", (0, 0, L["chest"]), (0, 0, L["neck"]), RIG + "Spine1", True),
+    (RIG + "Head", (0, 0, L["neck"]), (0, 0, L["skull"]), RIG + "Neck", True),
 ]
-BONES += mirrored("Shoulder", (0.06, 0, 0.78), (0.26, 0, 0.78), "Spine1", False)
-BONES += mirrored("Arm", (0.26, 0, 0.78), (0.27, 0, 0.60), "{s}Shoulder", True)
-BONES += mirrored("ForeArm", (0.27, 0, 0.60), (0.28, 0, 0.45), "{s}Arm", True)
-BONES += mirrored("Hand", (0.28, 0, 0.45), (0.28, 0, 0.37), "{s}ForeArm", True)
-BONES += mirrored("UpLeg", (0.13, 0, 0.40), (0.13, 0, 0.23), "Hips", False)
-BONES += mirrored("Leg", (0.13, 0, 0.23), (0.13, 0, 0.07), "{s}UpLeg", True)
-BONES += mirrored("Foot", (0.13, 0, 0.07), (0.13, -0.13, 0.03), "{s}Leg", True)
+BONES += mirrored("Shoulder", (0.06, 0, L["shoulder_z"]), (L["shoulder_x"], 0, L["shoulder_z"]), "Spine1", False)
+# Руки — в A-позе, как на мокапах: меш так сгенерирован, и веса лягут ровно.
+# Клипы опускают их постоянным приведением, см. ARM_ADDUCT.
+BONES += mirrored("Arm", (L["shoulder_x"], 0, L["shoulder_z"]), L["elbow"], "{s}Shoulder", True)
+BONES += mirrored("ForeArm", L["elbow"], L["wrist"], "{s}Arm", True)
+BONES += mirrored("Hand", L["wrist"], L["hand"], "{s}ForeArm", True)
+BONES += mirrored("UpLeg", (L["leg_x"], 0, L["crotch"]), (L["leg_x"], 0, L["knee"]), "Hips", False)
+BONES += mirrored("Leg", (L["leg_x"], 0, L["knee"]), (L["leg_x"], 0, L["ankle"]), "{s}UpLeg", True)
+BONES += mirrored("Foot", (L["leg_x"], 0, L["ankle"]), (L["leg_x"], L["foot_fwd"], 0.02), "{s}Leg", True)
 
-# Вне humanoid: хвост и уши. Пружина или синус с отставанием — на рантайме.
+# Вне humanoid: хвост и уши. Хвост — дугой в сторону, как на мокапе сбоку.
+T = L["tail"]
 BONES += [
-    ("tail_1", (0, 0.15, 0.45), (0, 0.34, 0.50), RIG + "Hips", False),
-    ("tail_2", (0, 0.34, 0.50), (0, 0.44, 0.64), "tail_1", True),
-    ("tail_3", (0, 0.44, 0.64), (0, 0.42, 0.80), "tail_2", True),
-    ("ear_l", (0.10, 0.02, 1.06), (0.12, 0.03, 1.20), RIG + "Head", False),
-    ("ear_r", (-0.10, 0.02, 1.06), (-0.12, 0.03, 1.20), RIG + "Head", False),
-    # Сокеты: пропс крепится к кости и риггинга не требует вообще.
-    ("socket_hand_r", (-0.28, -0.08, 0.40), (-0.28, -0.20, 0.40), RIG + "RightHand", False),
-    ("socket_back", (0, 0.18, 0.74), (0, 0.30, 0.74), RIG + "Spine1", False),
+    ("tail_1", T[0], T[1], RIG + "Hips", False),
+    ("tail_2", T[1], T[2], "tail_1", True),
+    ("tail_3", T[2], T[3], "tail_2", True),
+    ("ear_l", L["ear"][0], L["ear"][1], RIG + "Head", False),
+    ("ear_r", (-L["ear"][0][0],) + L["ear"][0][1:], (-L["ear"][1][0],) + L["ear"][1][1:], RIG + "Head", False),
+]
+# Сокеты: пропс крепится к кости и риггинга не требует вообще.
+HAND_R = (-L["hand"][0], -0.03, L["hand"][2])
+SOCKETS = [
+    ("socket_hand_r", HAND_R, (HAND_R[0], HAND_R[1] - 0.12, HAND_R[2]), RIG + "RightHand"),
+    ("socket_back", (0, 0.10, L["spine"] + 0.04), (0, 0.22, L["spine"] + 0.04), RIG + "Spine1"),
 ]
 
 
@@ -101,113 +131,255 @@ def build_armature():
         if parent is not None:
             b.parent = arm.edit_bones[parent]
             b.use_connect = connect
+    for name, head, tail, parent in SOCKETS:
+        b = arm.edit_bones.new(name)
+        b.head, b.tail = Vector(head), Vector(tail)
+        b.parent = arm.edit_bones[parent]
     bpy.ops.object.mode_set(mode="OBJECT")
+    # Сокет не деформирует: иначе автовеса отдадут ему кусок ладони.
+    for name, *_ in SOCKETS:
+        arm.bones[name].use_deform = False
     return obj
 
 
 # --------------------------------------------------------------------------
-# Геометрия. Коробки и пирамидки: на дистанции камеры этого достаточно,
-# а топология остаётся чистой — к ней крепится скелет.
+# Геометрия кота: меш из assets/gen/, сгенерированный по мокапам. Здесь он
+# нормируется, ремешится под бюджет, красится проекцией мокапов и режется на
+# голову и корпус. Пропсы по-прежнему коробки — на сокетах их и так не видно.
 # --------------------------------------------------------------------------
 
-def box(centre, size, bone):
-    cx, cy, cz = centre
-    sx, sy, sz = (s / 2 for s in size)
-    verts = [
-        (cx - sx, cy - sy, cz - sz), (cx + sx, cy - sy, cz - sz),
-        (cx + sx, cy + sy, cz - sz), (cx - sx, cy + sy, cz - sz),
-        (cx - sx, cy - sy, cz + sz), (cx + sx, cy - sy, cz + sz),
-        (cx + sx, cy + sy, cz + sz), (cx - sx, cy + sy, cz + sz),
-    ]
-    faces = [(0, 3, 2, 1), (4, 5, 6, 7), (0, 1, 5, 4),
-             (1, 2, 6, 5), (2, 3, 7, 6), (3, 0, 4, 7)]
-    return verts, faces, bone
+GEN = os.path.join(ROOT, "assets", "gen", "rusty_src.glb")
+# Ракурсы, по которым генерировался меш; они же красят его. Направление —
+# куда смотрит камера, `right` — мировая ось вдоль ширины картинки.
+VIEWS = [
+    ("rusty_front.png", Vector((0, 1, 0)), Vector((1, 0, 0)), False),
+    ("rusty_back.png", Vector((0, -1, 0)), Vector((-1, 0, 0)), False),
+    ("rusty_left.png", Vector((-1, 0, 0)), Vector((0, 1, 0)), False),
+    # Правого ракурса нет: левый зеркалится. Хвост окажется не с той стороны,
+    # но он одного цвета с шерстью, и разницы не видно.
+    ("rusty_left.png", Vector((1, 0, 0)), Vector((0, -1, 0)), True),
+]
+BODY_TRIS = 10_000
 
 
-def wedge(base, apex, half, bone):
-    """Ухо: четырёхгранная пирамидка. Дешевле конуса и читается силуэтом."""
-    bx, by, bz = base
-    verts = [
-        (bx - half, by - half, bz), (bx + half, by - half, bz),
-        (bx + half, by + half, bz), (bx - half, by + half, bz), apex,
-    ]
-    faces = [(0, 3, 2, 1), (0, 1, 4), (1, 2, 4), (2, 3, 4), (3, 0, 4)]
-    return verts, faces, bone
+def import_gen():
+    """Сгенерированный меш, нормированный: подошва на z=0, уши на HEIGHT,
+    центр корпуса в нуле по X и Y (хвост в центровку не входит)."""
+    if not os.path.exists(GEN):
+        sys.exit(f"нет {GEN}: сгенерируй меш по assets/gen/rusty_mv.workflow.json")
+    before = set(bpy.data.objects)
+    bpy.ops.import_scene.gltf(filepath=GEN)
+    meshes = [o for o in set(bpy.data.objects) - before if o.type == "MESH"]
+    for o in set(bpy.data.objects) - before:
+        if o.type != "MESH":
+            bpy.data.objects.remove(o)
+    obj = meshes[0]
+    bpy.context.view_layer.objects.active = obj
+    for o in meshes:
+        o.select_set(True)
+    if len(meshes) > 1:
+        bpy.ops.object.join()
+    bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
 
-
-def mesh_from(name, parts, material):
-    """Сборка меша из кусков: каждый кусок жёстко привязан к одной кости."""
-    verts, faces, groups = [], [], {}
-    for pv, pf, bone in parts:
-        off = len(verts)
-        groups.setdefault(bone, []).extend(range(off, off + len(pv)))
-        verts.extend(pv)
-        faces.extend(tuple(i + off for i in f) for f in pf)
-
-    me = bpy.data.meshes.new(name)
-    me.from_pydata(verts, [], faces)
-    me.validate()
-    # Плоская заливка: форма читается затенением по нормали, текстур нет.
-    me.materials.append(material)
-    for poly in me.polygons:
-        poly.use_smooth = False
-
-    obj = bpy.data.objects.new(name, me)
-    bpy.context.collection.objects.link(obj)
-    for bone, idx in groups.items():
-        obj.vertex_groups.new(name=bone).add(idx, 1.0, "REPLACE")
+    me = obj.data
+    zs = [v.co.z for v in me.vertices]
+    zmin, zmax = min(zs), max(zs)
+    k = HEIGHT / (zmax - zmin)
+    torso = [v.co for v in me.vertices if abs(v.co.z - (zmin + zmax) / 2) < 0.02 * (zmax - zmin)]
+    # Корпус по срезу на половине роста: без хвоста и рук — только |x| мал.
+    core = [c for c in torso if abs(c.x) < 0.15 * (zmax - zmin)]
+    yc = (min(c.y for c in core) + max(c.y for c in core)) / 2
+    xc = (min(c.x for c in core) + max(c.x for c in core)) / 2
+    for v in me.vertices:
+        v.co = Vector(((v.co.x - xc) * k, (v.co.y - yc) * k, (v.co.z - zmin) * k))
     return obj
 
 
-def flat_material(name, colour):
+def remesh(obj, tris):
+    """Замкнуть, переслоить вокселями, ужать коллапсом под бюджет.
+
+    Меш из surface nets на ~1% немногообразный, и на нём напрямую не
+    работает ни то, ни другое: OpenVDB выдаёт кашу, а коллапс упирается в
+    рёбра, которые не может стянуть, и останавливается на 25k. Поэтому
+    сначала вырезаются грани на немногообразных рёбрах и затягиваются дыры —
+    после этого воксельный ремеш даёт чистую замкнутую поверхность, и
+    децимация на ней сходится.
+    """
+    import bmesh
+
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-5)
+    bad = set()
+    for e in bm.edges:
+        if not e.is_manifold and not e.is_boundary:
+            bad.update(e.link_faces)
+    bmesh.ops.delete(bm, geom=list(bad), context="FACES")
+    bmesh.ops.holes_fill(bm, edges=[e for e in bm.edges if e.is_boundary], sides=0)
+    bm.to_mesh(obj.data)
+    bm.free()
+
+    bpy.context.view_layer.objects.active = obj
+    obj.select_set(True)
+    m = obj.modifiers.new("voxel", "REMESH")
+    m.mode = "VOXEL"
+    m.voxel_size = HEIGHT / 150
+    bpy.ops.object.modifier_apply(modifier="voxel")
+    d = obj.modifiers.new("dec", "DECIMATE")
+    d.ratio = tris / sum(len(p.vertices) - 2 for p in obj.data.polygons)
+    bpy.ops.object.modifier_apply(modifier="dec")
+    for poly in obj.data.polygons:
+        poly.use_smooth = True
+
+
+def paint_from_views(obj):
+    """Цвет вершин — проекцией мокапов. Текстур в контракте нет; для
+    изометрии с такой дистанции цвета по вершинам хватает.
+
+    Каждая вершина берёт цвет с ракурсов, к которым повёрнута её нормаль,
+    с весом по косинусу: спереди красит фронт, сбоку — бок, на стыках —
+    смесь. Проекция ортографическая: bbox меша в bbox силуэта картинки.
+    """
+    import numpy as np
+
+    me = obj.data
+    coords = np.array([v.co[:] for v in me.vertices])
+    normals = np.array([v.normal[:] for v in me.vertices])
+    acc = np.zeros((len(coords), 3))
+    wsum = np.zeros(len(coords))
+    up = np.array([0.0, 0.0, 1.0])
+
+    for fname, direction, right, mirror in VIEWS:
+        img = bpy.data.images.load(os.path.join(ROOT, "assets", "gen", fname))
+        w, h = img.size
+        px = np.empty(w * h * 4, dtype=np.float32)
+        img.pixels.foreach_get(px)
+        px = px.reshape(h, w, 4)
+        if mirror:
+            px = px[:, ::-1]
+        alpha = px[:, :, 3] > 0.5
+        rows = np.where(alpha.any(axis=1))[0]
+        cols = np.where(alpha.any(axis=0))[0]
+        r0, r1, c0, c1 = rows.min(), rows.max(), cols.min(), cols.max()
+
+        d = np.array(direction[:])
+        rt = np.array(right[:])
+        u = coords @ rt
+        z = coords @ up
+        # Хвост в бок-ракурсе торчит за корпус, поэтому bbox — по мешу целиком.
+        un = (u - u.min()) / (u.max() - u.min())
+        zn = (z - z.min()) / (z.max() - z.min())
+        col = np.clip((c0 + un * (c1 - c0)).round().astype(int), 0, w - 1)
+        row = np.clip((r0 + zn * (r1 - r0)).round().astype(int), 0, h - 1)
+        sample = px[row, col]
+        weight = np.clip(-(normals @ d), 0, None) ** 2 * (sample[:, 3] > 0.5)
+        acc += sample[:, :3] * weight[:, None]
+        wsum += weight
+        bpy.data.images.remove(img)
+
+    fallback = np.array([RUSTY[:3]])
+    colours = np.where(wsum[:, None] > 1e-4, acc / np.maximum(wsum, 1e-4)[:, None], fallback)
+    attr = me.color_attributes.new("Col", "FLOAT_COLOR", "POINT")
+    flat = np.concatenate([colours, np.ones((len(colours), 1))], axis=1).ravel()
+    attr.data.foreach_set("color", flat.astype(np.float32))
+    me.color_attributes.active_color = attr
+
+
+def split_head(obj, z):
+    """Голова и корпус — разные меши: у них разные хозяева (порода vs
+    архетип), и по имени код гасит видимость."""
+    bpy.context.view_layer.objects.active = obj
+    obj.select_set(True)
+    bpy.ops.object.mode_set(mode="EDIT")
+    bpy.ops.mesh.select_all(action="DESELECT")
+    bpy.ops.object.mode_set(mode="OBJECT")
+    for poly in obj.data.polygons:
+        poly.select = obj.data.vertices[poly.vertices[0]].co.z >= z
+    bpy.ops.object.mode_set(mode="EDIT")
+    bpy.ops.mesh.separate(type="SELECTED")
+    bpy.ops.object.mode_set(mode="OBJECT")
+    head = [o for o in bpy.context.selected_objects if o != obj][0]
+    return obj, head
+
+
+def vertex_colour_material(name):
+    """Материал, который рисует цвет вершин. Экспортёр кладёт COLOR_0 только
+    если материал на него ссылается."""
     mat = bpy.data.materials.new(name)
     mat.use_nodes = True
-    bsdf = mat.node_tree.nodes["Principled BSDF"]
-    bsdf.inputs["Base Color"].default_value = colour
+    nodes = mat.node_tree.nodes
+    bsdf = nodes["Principled BSDF"]
+    col = nodes.new("ShaderNodeVertexColor")
+    col.layer_name = "Col"
+    mat.node_tree.links.new(col.outputs["Color"], bsdf.inputs["Base Color"])
     bsdf.inputs["Roughness"].default_value = 0.9
     bsdf.inputs["Metallic"].default_value = 0.0
-    mat.diffuse_color = colour  # тот же цвет во вьюпорте и в превью
     return mat
 
 
-def build_body(mat):
-    """Массивность — одеждой, а не телом: архетип корпуса здесь ровно один.
+def build_cat(rig):
+    """Корпус и голова из сгенерированного меша, с весами от скелета."""
+    obj = import_gen()
+    remesh(obj, BODY_TRIS)
+    paint_from_views(obj)
+    mat = vertex_colour_material("rusty_skin")
+    obj.data.materials.append(mat)
 
-    Руки и ноги стоят снаружи корпуса с зазором: слипшийся силуэт на
-    изометрии читается сплошным блоком, и никакая анимация это не спасает.
+    body, head = split_head(obj, HEAD_SPLIT_Z)
+    body.name = body.data.name = "body_stocky"
+    head.name = head.data.name = "head_rusty"
+
+    # Автовеса: тепловая диффузия от костей. На меше из surface nets она не
+    # сходилась, после воксельного ремеша поверхность замкнута — сходится.
+    # Сокеты помечены как недеформирующие и веса не получают.
+    bpy.ops.object.select_all(action="DESELECT")
+    body.select_set(True)
+    head.select_set(True)
+    rig.select_set(True)
+    bpy.context.view_layer.objects.active = rig
+    bpy.ops.object.parent_set(type="ARMATURE_AUTO")
+    for obj in (body, head):
+        if not obj.vertex_groups:
+            sys.exit(f"{obj.name}: автовеса не легли")
+    return body, head
+
+
+def skin(obj, rig):
+    """Веса по ближайшей кости, с подмесом второй у суставов.
+
+    Тепловая диффузия Blender на этом меше не сходится (после децимации он
+    не замкнут), а костюм жёсткий — стёганка не тянется, как кожа. Ближайшая
+    кость даёт ровно ту жёсткость, которая тут и нужна; подмес второй нужен
+    только чтобы сустав не рвался.
     """
-    p = [
-        box((0, 0, 0.47), (0.38, 0.28, 0.16), RIG + "Hips"),
-        box((0, -0.01, 0.61), (0.40, 0.29, 0.14), RIG + "Spine"),
-        box((0, -0.02, 0.75), (0.40, 0.30, 0.16), RIG + "Spine1"),
-    ]
-    for side, sx in (("Left", 1.0), ("Right", -1.0)):
-        p += [
-            box((sx * 0.265, 0, 0.70), (0.11, 0.13, 0.19), RIG + side + "Arm"),
-            box((sx * 0.275, 0, 0.525), (0.09, 0.11, 0.16), RIG + side + "ForeArm"),
-            box((sx * 0.28, -0.01, 0.40), (0.10, 0.12, 0.11), RIG + side + "Hand"),
-            box((sx * 0.13, 0, 0.315), (0.15, 0.17, 0.18), RIG + side + "UpLeg"),
-            box((sx * 0.13, 0, 0.15), (0.13, 0.15, 0.17), RIG + side + "Leg"),
-            box((sx * 0.13, -0.06, 0.035), (0.14, 0.26, 0.07), RIG + side + "Foot"),
-        ]
-    p += [
-        box((0, 0.245, 0.475), (0.09, 0.21, 0.10), "tail_1"),
-        box((0, 0.39, 0.57), (0.07, 0.13, 0.17), "tail_2"),
-        box((0, 0.43, 0.72), (0.05, 0.08, 0.16), "tail_3"),
-    ]
-    return mesh_from("body_stocky", p, mat)
+    import numpy as np
 
+    bones = [b for b in rig.data.bones if b.use_deform]
+    heads = np.array([b.head_local[:] for b in bones])
+    tails = np.array([b.tail_local[:] for b in bones])
+    coords = np.array([v.co[:] for v in obj.data.vertices])
 
-def build_head(mat):
-    """Идентичность несёт голова: порода, уши, морда. Уникальна на кота."""
-    p = [
-        box((0, 0, 0.99), (0.34, 0.32, 0.30), RIG + "Head"),
-        # Морда: без неё поворот головы не виден вообще.
-        box((0, -0.19, 0.95), (0.18, 0.10, 0.14), RIG + "Head"),
-        wedge((0.10, 0.02, 1.08), (0.12, 0.03, 1.22), 0.06, "ear_l"),
-        wedge((-0.10, 0.02, 1.08), (-0.12, 0.03, 1.22), 0.06, "ear_r"),
-    ]
-    return mesh_from("head_rusty", p, mat)
+    # Расстояние от точки до отрезка кости.
+    ab = tails - heads
+    ab_len2 = np.maximum((ab * ab).sum(axis=1), 1e-9)
+    ap = coords[:, None, :] - heads[None, :, :]
+    t = np.clip((ap * ab[None, :, :]).sum(axis=2) / ab_len2[None, :], 0.0, 1.0)
+    closest = heads[None, :, :] + t[:, :, None] * ab[None, :, :]
+    dist = np.linalg.norm(coords[:, None, :] - closest, axis=2)
+
+    order = np.argsort(dist, axis=1)
+    d1 = dist[np.arange(len(coords)), order[:, 0]]
+    d2 = dist[np.arange(len(coords)), order[:, 1]]
+    # Подмес второй кости — только когда она почти так же близко.
+    w2 = np.where(d2 < d1 * 1.5, (d1 / d2) ** 4, 0.0)
+    w1 = 1.0 - w2 * 0.5
+    w2 = w2 * 0.5
+
+    groups = [obj.vertex_groups.new(name=b.name) for b in bones]
+    for i in range(len(coords)):
+        groups[order[i, 0]].add([i], float(w1[i]), "REPLACE")
+        if w2[i] > 0.0:
+            groups[order[i, 1]].add([i], float(w2[i]), "REPLACE")
 
 
 def build_prop(name, parts, mat):
@@ -225,6 +397,31 @@ def build_prop(name, parts, mat):
     obj = bpy.data.objects.new(name, me)
     bpy.context.collection.objects.link(obj)
     return obj
+
+
+def box(centre, size, bone):
+    cx, cy, cz = centre
+    sx, sy, sz = (s / 2 for s in size)
+    verts = [
+        (cx - sx, cy - sy, cz - sz), (cx + sx, cy - sy, cz - sz),
+        (cx + sx, cy + sy, cz - sz), (cx - sx, cy + sy, cz - sz),
+        (cx - sx, cy - sy, cz + sz), (cx + sx, cy - sy, cz + sz),
+        (cx + sx, cy + sy, cz + sz), (cx - sx, cy + sy, cz + sz),
+    ]
+    faces = [(0, 3, 2, 1), (4, 5, 6, 7), (0, 1, 5, 4),
+             (1, 2, 6, 5), (2, 3, 7, 6), (3, 0, 4, 7)]
+    return verts, faces, bone
+
+
+def flat_material(name, colour):
+    mat = bpy.data.materials.new(name)
+    mat.use_nodes = True
+    bsdf = mat.node_tree.nodes["Principled BSDF"]
+    bsdf.inputs["Base Color"].default_value = colour
+    bsdf.inputs["Roughness"].default_value = 0.9
+    bsdf.inputs["Metallic"].default_value = 0.0
+    mat.diffuse_color = colour  # тот же цвет во вьюпорте и в превью
+    return mat
 
 
 def socket(obj, rig, bone, where, tilt=(0.0, 0.0, 0.0)):
@@ -253,6 +450,15 @@ def socket(obj, rig, bone, where, tilt=(0.0, 0.0, 0.0)):
 
 FPS = 30
 X, Y, Z = (1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)
+
+
+# Rest-поза рук — A-поза мокапа. В клипах руки опущены: постоянное приведение
+# к корпусу вокруг вертикали, поверх него — поза. Плечи в клипах не ключуются,
+# поэтому кость плеча всегда должна быть в списке затронутых.
+ARM_ADDUCT = {
+    RIG + "LeftArm": [(Y, 0.24)],
+    RIG + "RightArm": [(Y, -0.24)],
+}
 
 
 def to_bone(pb, turns):
@@ -381,7 +587,7 @@ def vacuum(sweep, dip):
         {
             # Взмах — вокруг вертикали: рука уже вынесена вперёд, и поворот
             # вокруг Y (оси «вперёд») её не разводит в стороны, а закручивает.
-            RIG + "RightArm": [(X, -0.80), (Z, sweep * 0.60)],
+            RIG + "RightArm": [(X, -0.55), (Z, sweep * 0.60)],
             RIG + "RightForeArm": [(X, -0.50)],
             RIG + "LeftArm": [(X, -0.30), (Z, -0.14)],
             RIG + "LeftForeArm": [(X, -0.55)],
@@ -482,7 +688,7 @@ def bake(rig, name, keys):
             pb.location = Vector((0.0, 0.0, 0.0))
         for name_b in touched:
             pb = rig.pose.bones[name_b]
-            pb.rotation_quaternion = to_bone(pb, pose.get(name_b, []))
+            pb.rotation_quaternion = to_bone(pb, ARM_ADDUCT.get(name_b, []) + pose.get(name_b, []))
         # Подъём таза — в базисе его кости: она смотрит вверх, но полагаться
         # на это на глаз не стоит.
         rise = pose.get("@rise", 0.0)
@@ -517,6 +723,12 @@ def build_clips(rig):
         print(f"  клип {name}: {last - 1} кадров, {(last - 1) / FPS:.2f} с, "
               f"{len(fcurves_of(act))} кривых")
     ad.action = None
+    # Сброс позы: последний ключ остаётся на костях и после снятия экшена,
+    # а сокеты дальше ставятся от rest-позы.
+    for pb in rig.pose.bones:
+        pb.rotation_quaternion = Quaternion((1.0, 0.0, 0.0, 0.0))
+        pb.location = Vector((0.0, 0.0, 0.0))
+    bpy.context.view_layer.update()
 
 
 def main():
@@ -524,17 +736,10 @@ def main():
     bpy.context.scene.unit_settings.system = "METRIC"
     bpy.context.scene.render.fps = FPS
 
-    m_body = flat_material("rusty_body", RUSTY)
-    m_head = flat_material("rusty_head", RUSTY_HEAD)
     m_gear = flat_material("gear", GEAR)
 
     rig = build_armature()
-    body = build_body(m_body)
-    head = build_head(m_head)
-
-    for obj in (body, head):
-        obj.parent = rig
-        obj.modifiers.new("Armature", "ARMATURE").object = rig
+    body, head = build_cat(rig)
 
     # Пылесос: ранец на спине и раструб в правой лапе. Рабочий цикл строится
     # от предмета, поэтому предмет существует как отдельный объект в сокете.
@@ -550,8 +755,8 @@ def main():
     ], m_gear)
     build_clips(rig)
 
-    socket(held, rig, "socket_hand_r", (-0.28, -0.13, 0.42), (0.35, 0, 0))
-    socket(gear, rig, "socket_back", (0, 0.24, 0.66))
+    socket(held, rig, "socket_hand_r", (HAND_R[0], HAND_R[1] - 0.06, HAND_R[2] + 0.02), (0.35, 0, 0))
+    socket(gear, rig, "socket_back", (0, 0.24, L["spine"] + 0.02))
 
     tris = 0
     for obj in (body, head, held, gear):
@@ -566,6 +771,7 @@ def main():
         export_yup=True,
         export_apply=True,
         export_skins=True,
+        export_vertex_color="ACTIVE",
         export_animations=True,
         export_animation_mode="ACTIONS",
         export_frame_range=False,

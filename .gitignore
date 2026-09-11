@@ -3,3 +3,7 @@ dist/
 *.local
 .DS_Store
 *.blend1
+
+# Сгенерированные исходники (Hunyuan3D): тяжёлые, воспроизводятся из mocks/ и workflow
+assets/gen/*.glb
+__pycache__/
