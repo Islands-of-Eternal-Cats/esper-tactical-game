@@ -116,7 +116,8 @@ BONES += [
 HAND_R = (-L["hand"][0], -0.03, L["hand"][2])
 SOCKETS = [
     ("socket_hand_r", HAND_R, (HAND_R[0], HAND_R[1] - 0.12, HAND_R[2]), RIG + "RightHand"),
-    ("socket_back", (0, 0.12, L["spine"] + 0.04), (0, 0.24, L["spine"] + 0.04), RIG + "Spine1"),
+    # Ранец сидит на пояснице, у ремня — не между лопатками: кость Spine.
+    ("socket_back", (0, 0.12, L["spine"] - 0.04), (0, 0.24, L["spine"] - 0.04), RIG + "Spine"),
 ]
 
 
@@ -941,7 +942,8 @@ def main():
     build_clips(rig)
 
     socket(held, rig, "socket_hand_r", (HAND_R[0], HAND_R[1] - 0.06, HAND_R[2] + 0.02), (0.35, 0, 0))
-    socket(gear, rig, "socket_back", (0, 0.27, L["spine"] + 0.02))
+    # Дно бака — у ремня, бак прижат к спине (задняя поверхность ~0.12).
+    socket(gear, rig, "socket_back", (0, 0.22, L["hips"] + 0.10))
 
     tris = 0
     for obj in (body, head, held, gear):
