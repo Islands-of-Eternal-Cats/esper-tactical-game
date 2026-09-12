@@ -172,6 +172,9 @@ HEAD_PARTS = {PART["head"], 15, 16, 17, 18, 19, 20}
 # Жёсткие детали: вся часть — на одной кости, ей нечего гнуть. Сторона у
 # бедренных подсумков — по знаку X центроида, чтобы не путать лево и право.
 RIGID_PARTS = {
+    # Капюшон и воротник остаются на плечах, голова крутится внутри: иначе
+    # воротник скручивается вслед за ней и отходит от куртки над плечом.
+    PART["hood"]: RIG + "Spine1",
     PART["thigh_pouch_l"]: "UpLeg", PART["thigh_pouch_r"]: "UpLeg",
     PART["belt_pouch_front"]: RIG + "Hips", PART["belt_pouch_side"]: RIG + "Hips",
     PART["belt_pouch_back"]: RIG + "Hips", PART["chest_tag"]: RIG + "Spine1",
