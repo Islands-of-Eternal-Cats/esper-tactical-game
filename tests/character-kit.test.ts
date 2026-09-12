@@ -22,27 +22,50 @@ interface Gltf {
   meshes: { name: string; primitives: { indices: number; attributes: Record<string, number> }[] }[]
   nodes: { name: string; mesh?: number; skin?: number; children?: number[] }[]
   skins: { name: string; joints: number[] }[]
-  accessors: { count: number; min?: number[]; max?: number[] }[]
+  accessors: {
+    count: number
+    type: string
+    componentType: number
+    bufferView?: number
+    byteOffset?: number
+    min?: number[]
+    max?: number[]
+  }[]
+  bufferViews: { byteOffset?: number; byteLength: number; byteStride?: number }[]
   images?: { mimeType?: string }[]
 }
 
-function readGlb(): { json: Gltf; bytes: number } {
+function readGlb(): { json: Gltf; bytes: number; bin: Buffer } {
   const buf = readFileSync(GLB)
   const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength)
   let off = 12
+  let json: Gltf | null = null
+  let bin: Buffer | null = null
   while (off < buf.byteLength) {
     const len = view.getUint32(off, true)
     const type = view.getUint32(off + 4, true)
     off += 8
-    if (type === 0x4e4f534a) {
-      return { json: JSON.parse(buf.subarray(off, off + len).toString('utf8')) as Gltf, bytes: buf.byteLength }
-    }
+    if (type === 0x4e4f534a) json = JSON.parse(buf.subarray(off, off + len).toString('utf8')) as Gltf
+    else if (type === 0x004e4942) bin = buf.subarray(off, off + len)
     off += len
   }
-  throw new Error('в GLB нет JSON-чанка')
+  if (json === null || bin === null) throw new Error('в GLB нет JSON- или BIN-чанка')
+  return { json, bytes: buf.byteLength, bin }
 }
 
-const { json, bytes } = readGlb()
+const { json, bytes, bin } = readGlb()
+
+/** Данные аксессора как Float32Array (только float, только без stride). */
+function floats(accessor: number): Float32Array {
+  const acc = json.accessors[accessor]
+  if (acc === undefined) throw new Error(`нет аксессора ${accessor}`)
+  if (acc.componentType !== 5126) throw new Error(`аксессор ${accessor} не float`)
+  const bv = json.bufferViews[acc.bufferView ?? -1]
+  if (bv === undefined || bv.byteStride !== undefined) throw new Error(`аксессор ${accessor}: нет bufferView или есть stride`)
+  const n = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4 }[acc.type] ?? 0
+  const start = bin.byteOffset + (bv.byteOffset ?? 0) + (acc.byteOffset ?? 0)
+  return new Float32Array(bin.buffer.slice(start, start + acc.count * n * 4))
+}
 const index = new Map(json.nodes.map((n, i) => [n.name, i]))
 
 /** Индекс узла по имени. Отсутствие — это провал контракта, а не undefined. */
@@ -137,6 +160,23 @@ describe('character-kit.glb', () => {
     for (const anim of json.animations ?? []) {
       const targets = anim.channels.map((c) => c.target.node)
       expect(targets, `клип ${anim.name} трогает голову`).not.toContain(head)
+    }
+  })
+
+  it('каждая вершина кота кому-то принадлежит', () => {
+    // Вершина без весов остаётся в bind-позе и висит в воздухе, когда кот
+    // двигается. В Blender это не видно, в игре — сразу. Так летали кусок
+    // хвоста и бирка на ремне; страховка в скрипте, проверка — здесь.
+    for (const name of ['head_rusty', 'body_stocky']) {
+      const mesh = json.meshes.find((m) => m.name === name)
+      const weights = mesh?.primitives[0]?.attributes.WEIGHTS_0
+      expect(weights, `${name} без весов`).toBeDefined()
+      const w = floats(weights!)
+      let orphans = 0
+      for (let i = 0; i < w.length; i += 4) {
+        if (w[i]! + w[i + 1]! + w[i + 2]! + w[i + 3]! < 0.01) orphans++
+      }
+      expect(orphans, `${name}: вершин без весов`).toBe(0)
     }
   })
 

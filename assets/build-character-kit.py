@@ -50,21 +50,22 @@ RIG = "mixamorig:"
 
 HEIGHT = 1.20
 
-# Колено — по наколенникам (28 % роста), пах — по промежности на концепте
-# (39 %), не по низу штанов: там, где по центру появляется геометрия, висит
-# мешковатая ткань, а не сустав, и первая мерка по сечениям это спутала.
+# Ориентиры сняты по сечениям меша Tripo (после нормировки): колено — по
+# наколенникам, пах — где сходятся ноги, плечи — где сужается силуэт над
+# руками. Руки висят ниже, чем у Hunyuan-меша: кисти на 0.48, а не 0.52.
 L = {
-    "ankle": 0.05, "knee": 0.33, "crotch": 0.47, "hips": 0.62,
-    "spine": 0.78, "chest": 0.94, "neck": 1.01, "skull": 1.16,
-    "leg_x": 0.10, "foot_fwd": -0.12,
-    "shoulder_x": 0.20, "shoulder_z": 0.96,
-    "elbow": (0.265, 0.0, 0.74), "wrist": (0.33, 0.0, 0.52), "hand": (0.33, 0.0, 0.47),
-    "tail": [(0.03, 0.09, 0.57), (0.10, 0.12, 0.42), (0.17, 0.14, 0.28), (0.24, 0.16, 0.14)],
-    "ear": ((0.075, 0.0, 1.13), (0.09, 0.0, 1.20)),
+    "ankle": 0.05, "knee": 0.33, "crotch": 0.45, "hips": 0.62,
+    "spine": 0.76, "chest": 0.90, "neck": 0.96, "skull": 1.10,
+    "leg_x": 0.11, "foot_fwd": -0.12,
+    "shoulder_x": 0.20, "shoulder_z": 0.88,
+    "elbow": (0.28, -0.02, 0.70), "wrist": (0.34, -0.04, 0.55), "hand": (0.35, -0.04, 0.48),
+    # Хвост Tripo висит вниз и чуть влево (в +X), кончик у щиколоток.
+    "tail": [(0.04, 0.18, 0.58), (0.10, 0.21, 0.42), (0.15, 0.23, 0.26), (0.24, 0.28, 0.10)],
+    "ear": ((0.07, -0.07, 1.12), (0.085, -0.07, 1.20)),
 }
 # Граница головы и корпуса: выше — head_rusty, ниже — body_stocky. Чуть выше
 # шеи, чтобы воротник капюшона остался на корпусе.
-HEAD_SPLIT_Z = 1.02
+HEAD_SPLIT_Z = 0.98
 
 # --------------------------------------------------------------------------
 # Скелет. head → tail, родитель, срастаться ли с родителем.
@@ -118,7 +119,7 @@ BONES += [
 HAND_R = (-L["hand"][0], -0.03, L["hand"][2])
 SOCKETS = [
     ("socket_hand_r", HAND_R, (HAND_R[0], HAND_R[1] - 0.12, HAND_R[2]), RIG + "RightHand"),
-    ("socket_back", (0, 0.10, L["spine"] + 0.04), (0, 0.22, L["spine"] + 0.04), RIG + "Spine1"),
+    ("socket_back", (0, 0.12, L["spine"] + 0.04), (0, 0.24, L["spine"] + 0.04), RIG + "Spine1"),
 ]
 
 
@@ -146,42 +147,31 @@ def build_armature():
 
 
 # --------------------------------------------------------------------------
-# Геометрия кота: меш из assets/gen/, сгенерированный по мокапам. Здесь он
-# нормируется, ремешится под бюджет, красится проекцией мокапов и режется на
-# голову и корпус. Пропсы по-прежнему коробки — на сокетах их и так не видно.
+# Геометрия кота: меш Tripo по мокапам, assets/gen/tripo/ — OBJ с развёрткой
+# и картой цвета. Здесь он нормируется, красится (цвет вершин — из карты,
+# запасной) и режется на голову и корпус. Ремеша и проекции нет: Tripo отдаёт
+# чистую топологию на 5.4k треугольников и текстуру без призраков ракурсов —
+# Hunyuan-путь с ремешем и проектором в numpy жил здесь до него.
+# Пропсы по-прежнему коробки — на сокетах их и так не видно.
 # --------------------------------------------------------------------------
 
-GEN = os.path.join(ROOT, "assets", "gen", "rusty_src.glb")
-# Ракурсы, по которым генерировался меш; они же красят его. Направление —
-# куда смотрит камера, `right` — мировая ось вдоль ширины картинки.
-VIEWS = [
-    ("rusty_front.png", Vector((0, 1, 0)), Vector((1, 0, 0)), False),
-    ("rusty_back.png", Vector((0, -1, 0)), Vector((-1, 0, 0)), False),
-    ("rusty_left.png", Vector((-1, 0, 0)), Vector((0, 1, 0)), False),
-    # Правого ракурса нет: левый зеркалится. Хвост окажется не с той стороны,
-    # но он одного цвета с шерстью, и разницы не видно.
-    ("rusty_left.png", Vector((1, 0, 0)), Vector((0, -1, 0)), True),
-]
-BODY_TRIS = 10_000
+GEN_DIR = os.path.join(ROOT, "assets", "gen", "tripo")
+GEN = os.path.join(GEN_DIR, "rusty.obj")
+GEN_TEXTURE = os.path.join(GEN_DIR, "rusty_basecolor.jpg")
 
 
 def import_gen():
-    """Сгенерированный меш, нормированный: подошва на z=0, уши на HEIGHT,
-    центр корпуса в нуле по X и Y (хвост в центровку не входит)."""
+    """Меш Tripo, нормированный: подошва на z=0, уши на HEIGHT, центр корпуса
+    в нуле по X и Y (хвост и руки в центровку не входят)."""
     if not os.path.exists(GEN):
-        sys.exit(f"нет {GEN}: сгенерируй меш по assets/gen/rusty_mv.workflow.json")
+        sys.exit(f"нет {GEN}")
     before = set(bpy.data.objects)
-    bpy.ops.import_scene.gltf(filepath=GEN)
+    # OBJ у Tripo Y-вверх; импортёр разворачивает в Z-вверх поворотом объекта.
+    bpy.ops.wm.obj_import(filepath=GEN)
     meshes = [o for o in set(bpy.data.objects) - before if o.type == "MESH"]
-    for o in set(bpy.data.objects) - before:
-        if o.type != "MESH":
-            bpy.data.objects.remove(o)
     obj = meshes[0]
     bpy.context.view_layer.objects.active = obj
-    for o in meshes:
-        o.select_set(True)
-    if len(meshes) > 1:
-        bpy.ops.object.join()
+    obj.select_set(True)
     bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
 
     me = obj.data
@@ -189,102 +179,47 @@ def import_gen():
     zmin, zmax = min(zs), max(zs)
     k = HEIGHT / (zmax - zmin)
     torso = [v.co for v in me.vertices if abs(v.co.z - (zmin + zmax) / 2) < 0.02 * (zmax - zmin)]
-    # Корпус по срезу на половине роста: без хвоста и рук — только |x| мал.
     core = [c for c in torso if abs(c.x) < 0.15 * (zmax - zmin)]
     yc = (min(c.y for c in core) + max(c.y for c in core)) / 2
     xc = (min(c.x for c in core) + max(c.x for c in core)) / 2
     for v in me.vertices:
         v.co = Vector(((v.co.x - xc) * k, (v.co.y - yc) * k, (v.co.z - zmin) * k))
+    for poly in me.polygons:
+        poly.use_smooth = True
     return obj
 
 
-def remesh(obj, tris):
-    """Замкнуть, переслоить вокселями, ужать коллапсом под бюджет.
-
-    Меш из surface nets на ~1% немногообразный, и на нём напрямую не
-    работает ни то, ни другое: OpenVDB выдаёт кашу, а коллапс упирается в
-    рёбра, которые не может стянуть, и останавливается на 25k. Поэтому
-    сначала вырезаются грани на немногообразных рёбрах и затягиваются дыры —
-    после этого воксельный ремеш даёт чистую замкнутую поверхность, и
-    децимация на ней сходится.
-    """
-    import bmesh
-
-    bm = bmesh.new()
-    bm.from_mesh(obj.data)
-    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-5)
-    bad = set()
-    for e in bm.edges:
-        if not e.is_manifold and not e.is_boundary:
-            bad.update(e.link_faces)
-    bmesh.ops.delete(bm, geom=list(bad), context="FACES")
-    bmesh.ops.holes_fill(bm, edges=[e for e in bm.edges if e.is_boundary], sides=0)
-    bm.to_mesh(obj.data)
-    bm.free()
-
-    bpy.context.view_layer.objects.active = obj
-    obj.select_set(True)
-    m = obj.modifiers.new("voxel", "REMESH")
-    m.mode = "VOXEL"
-    m.voxel_size = HEIGHT / 150
-    bpy.ops.object.modifier_apply(modifier="voxel")
-    d = obj.modifiers.new("dec", "DECIMATE")
-    d.ratio = tris / sum(len(p.vertices) - 2 for p in obj.data.polygons)
-    bpy.ops.object.modifier_apply(modifier="dec")
-    for poly in obj.data.polygons:
-        poly.use_smooth = True
+def load_texture():
+    """Карта цвета Tripo — запакованной в .blend, чтобы эталон был один файл."""
+    img = bpy.data.images.load(GEN_TEXTURE)
+    img.name = "rusty_albedo"
+    img.pack()
+    return img
 
 
-def paint_from_views(obj):
-    """Цвет вершин — проекцией мокапов. Текстур в контракте нет; для
-    изометрии с такой дистанции цвета по вершинам хватает.
-
-    Каждая вершина берёт цвет с ракурсов, к которым повёрнута её нормаль,
-    с весом по косинусу: спереди красит фронт, сбоку — бок, на стыках —
-    смесь. Проекция ортографическая: bbox меша в bbox силуэта картинки.
-    """
+def paint_from_texture(obj, img):
+    """Цвет вершин из карты — запасной: если картинка до рендера не доехала,
+    кот всё равно цветной. Вершина берёт цвет по своей UV."""
     import numpy as np
 
     me = obj.data
-    coords = np.array([v.co[:] for v in me.vertices])
-    normals = np.array([v.normal[:] for v in me.vertices])
-    acc = np.zeros((len(coords), 3))
-    wsum = np.zeros(len(coords))
-    up = np.array([0.0, 0.0, 1.0])
-
-    for fname, direction, right, mirror in VIEWS:
-        img = bpy.data.images.load(os.path.join(ROOT, "assets", "gen", fname))
-        w, h = img.size
-        px = np.empty(w * h * 4, dtype=np.float32)
-        img.pixels.foreach_get(px)
-        px = px.reshape(h, w, 4)
-        if mirror:
-            px = px[:, ::-1]
-        alpha = px[:, :, 3] > 0.5
-        rows = np.where(alpha.any(axis=1))[0]
-        cols = np.where(alpha.any(axis=0))[0]
-        r0, r1, c0, c1 = rows.min(), rows.max(), cols.min(), cols.max()
-
-        d = np.array(direction[:])
-        rt = np.array(right[:])
-        u = coords @ rt
-        z = coords @ up
-        # Хвост в бок-ракурсе торчит за корпус, поэтому bbox — по мешу целиком.
-        un = (u - u.min()) / (u.max() - u.min())
-        zn = (z - z.min()) / (z.max() - z.min())
-        col = np.clip((c0 + un * (c1 - c0)).round().astype(int), 0, w - 1)
-        row = np.clip((r0 + zn * (r1 - r0)).round().astype(int), 0, h - 1)
-        sample = px[row, col]
-        weight = np.clip(-(normals @ d), 0, None) ** 2 * (sample[:, 3] > 0.5)
-        acc += sample[:, :3] * weight[:, None]
-        wsum += weight
-        bpy.data.images.remove(img)
-
-    fallback = np.array([RUSTY[:3]])
-    colours = np.where(wsum[:, None] > 1e-4, acc / np.maximum(wsum, 1e-4)[:, None], fallback)
-    attr = me.color_attributes.new("Col", "FLOAT_COLOR", "POINT")
-    flat = np.concatenate([colours, np.ones((len(colours), 1))], axis=1).ravel()
-    attr.data.foreach_set("color", flat.astype(np.float32))
+    w, h = img.size
+    px = np.empty(w * h * 4, dtype=np.float32)
+    img.pixels.foreach_get(px)
+    px = px.reshape(h, w, 4)
+    uv = me.uv_layers.active.data
+    colours = np.zeros((len(me.vertices), 4), dtype=np.float32)
+    counts = np.zeros(len(me.vertices), dtype=np.float32)
+    for loop in me.loops:
+        u, v = uv[loop.index].uv
+        col = int(min(max(u, 0.0), 0.9999) * w)
+        row = int(min(max(v, 0.0), 0.9999) * h)
+        colours[loop.vertex_index] += px[row, col]
+        counts[loop.vertex_index] += 1.0
+    colours /= np.maximum(counts, 1.0)[:, None]
+    colours[:, 3] = 1.0
+    attr = me.color_attributes.get("Col") or me.color_attributes.new("Col", "FLOAT_COLOR", "POINT")
+    attr.data.foreach_set("color", colours.ravel())
     me.color_attributes.active_color = attr
 
 
@@ -320,190 +255,6 @@ def vertex_colour_material(name):
     return mat
 
 
-TEXTURE_SIZE = 1024
-
-
-def view_pixels():
-    """Ракурсы в numpy: пиксели (снизу вверх, как у Blender), рамка силуэта в
-    долях 0..1 и оси. Зеркальный ракурс — отражённые пиксели."""
-    import numpy as np
-
-    out = []
-    for fname, direction, right, mirror in VIEWS:
-        img = bpy.data.images.load(os.path.join(ROOT, "assets", "gen", fname))
-        w, h = img.size
-        px = np.empty(w * h * 4, dtype=np.float32)
-        img.pixels.foreach_get(px)
-        bpy.data.images.remove(img)
-        px = px.reshape(h, w, 4)
-        if mirror:
-            px = px[:, ::-1]
-        alpha = px[:, :, 3] > 0.9
-        rows = np.where(alpha.any(axis=1))[0]
-        cols = np.where(alpha.any(axis=0))[0]
-        frame = (cols.min(), cols.max() + 1, rows.min(), rows.max() + 1)
-        out.append((px, np.array(direction[:]), np.array(right[:]), frame))
-    return out
-
-
-def bake_surface(obj):
-    """Позиция и нормаль каждого тексела атласа — запеканием эмиссии.
-
-    Дальше вся проекция считается в numpy: там есть луч на каждый тексел и
-    заливка по островам, а в нодах ни того, ни другого.
-    """
-    import numpy as np
-
-    n = TEXTURE_SIZE
-    mat = bpy.data.materials.new("rusty_surface")
-    mat.use_nodes = True
-    nodes, links = mat.node_tree.nodes, mat.node_tree.links
-    nodes.clear()
-    tex = nodes.new("ShaderNodeTexCoord")
-    geo = nodes.new("ShaderNodeNewGeometry")
-    emit = nodes.new("ShaderNodeEmission")
-    out = nodes.new("ShaderNodeOutputMaterial")
-    links.new(emit.outputs[0], out.inputs["Surface"])
-    target = nodes.new("ShaderNodeTexImage")
-    nodes.active = target
-    obj.data.materials.clear()
-    obj.data.materials.append(mat)
-
-    scene = bpy.context.scene
-    scene.render.engine = "CYCLES"
-    scene.cycles.device = "CPU"
-    scene.cycles.samples = 1
-    scene.render.bake.margin = 0
-    bpy.context.view_layer.objects.active = obj
-    obj.select_set(True)
-
-    def bake(name, source):
-        img = bpy.data.images.new(name, n, n, alpha=True, float_buffer=True)
-        img.generated_color = (0.0, 0.0, 0.0, 0.0)
-        img.colorspace_settings.name = "Non-Color"
-        target.image = img
-        links.new(source, emit.inputs["Color"])
-        bpy.ops.object.bake(type="EMIT")
-        px = np.empty(n * n * 4, dtype=np.float32)
-        img.pixels.foreach_get(px)
-        bpy.data.images.remove(img)
-        return px.reshape(n, n, 4)
-
-    pos = bake("bake_position", tex.outputs["Object"])
-    nrm = bake("bake_normal", geo.outputs["Normal"])
-    obj.data.materials.clear()
-    bpy.data.materials.remove(mat)
-    # Альфа единица там, куда легли острова UV; остальное — поля.
-    return pos[:, :, :3], nrm[:, :, :3], pos[:, :, 3] > 0.5
-
-
-def visibility(obj, pos, nrm, island, direction):
-    """Видимость текселов из ракурса: луч от точки к камере, упёрся в меш —
-    закрыт. Считается на текселах, а не вершинах: на крупных гранях бока
-    интерполяция по вершинам пропускала рукав призраком."""
-    import numpy as np
-    from mathutils import Vector
-    from mathutils.bvhtree import BVHTree
-
-    bvh = BVHTree.FromObject(obj, bpy.context.evaluated_depsgraph_get())
-    back = Vector((-direction).tolist())
-    vis = np.zeros(pos.shape[:2], dtype=bool)
-    ys, xs = np.where(island)
-    for y, x in zip(ys.tolist(), xs.tolist()):
-        p = pos[y, x]
-        nv = nrm[y, x]
-        origin = Vector((p[0] + nv[0] * 0.003, p[1] + nv[1] * 0.003, p[2] + nv[2] * 0.003))
-        hit, *_ = bvh.ray_cast(origin, back, 5.0)
-        vis[y, x] = hit is None
-    return vis
-
-
-def project_atlas(obj, pos, nrm, island):
-    """Цвет тексела — взвешенное среднее ракурсов: вес — квадрат косинуса
-    нормали к камере плюс малая константа (макушку никто не видит прямо),
-    ноль за силуэтом и там, где ракурс закрыт самим мешем."""
-    import numpy as np
-
-    lo, hi = pos[island].min(axis=0), pos[island].max(axis=0)
-    acc = np.zeros(pos.shape, dtype=np.float32)
-    wsum = np.zeros(pos.shape[:2], dtype=np.float32)
-    for px, direction, right, (c0, c1, r0, r1) in view_pixels():
-        h, w = px.shape[:2]
-        un = (pos @ right - min(lo @ right, hi @ right)) / abs(hi @ right - lo @ right)
-        vn = (pos[:, :, 2] - lo[2]) / (hi[2] - lo[2])
-        col = np.clip((c0 + un * (c1 - c0)).astype(int), 0, w - 1)
-        row = np.clip((r0 + vn * (r1 - r0)).astype(int), 0, h - 1)
-        sample = px[row, col]
-        facing = np.clip(-(nrm @ direction), 0.0, None)
-        weight = (facing * facing + 0.04) * (sample[:, :, 3] > 0.9) * island
-        weight = weight * visibility(obj, pos, nrm, island, direction)
-        acc += sample[:, :, :3] * weight[:, :, None]
-        wsum += weight
-    covered = wsum > 1e-4
-    rgb = np.where(covered[:, :, None], acc / np.maximum(wsum, 1e-4)[:, :, None], 0.0)
-    return rgb.astype(np.float32), covered
-
-
-def inpaint(rgb, covered, island, passes=64):
-    """Дорисовать непокрытое волной от покрытых соседей — сначала строго
-    внутри острова UV, потом наружу в поля. Через границу острова в атласе
-    соседи принадлежат другой части тела: без ограничения на бок затягивало
-    куски рукава."""
-    import numpy as np
-
-    shifts = [(dy, dx) for dy in (-1, 0, 1) for dx in (-1, 0, 1) if (dy, dx) != (0, 0)]
-
-    def grow(rgb, covered, allowed):
-        for _ in range(passes):
-            todo = allowed & ~covered
-            if not todo.any():
-                break
-            acc = np.zeros_like(rgb)
-            cnt = np.zeros(covered.shape, dtype=np.float32)
-            for dy, dx in shifts:
-                sc = np.roll(covered, (dy, dx), axis=(0, 1))
-                acc += np.roll(rgb, (dy, dx), axis=(0, 1)) * sc[:, :, None]
-                cnt += sc
-            fill = todo & (cnt > 0)
-            rgb[fill] = acc[fill] / cnt[fill][:, None]
-            covered = covered | fill
-        return rgb, covered
-
-    rgb, covered = grow(rgb, covered & island, island)
-    rgb[island & ~covered] = RUSTY[:3]
-    covered |= island
-    # Поля островов: запекание без margin, цвет вокруг вытягивается отсюда —
-    # без швов на мипах.
-    rgb, covered = grow(rgb, covered, np.ones_like(island))
-    return rgb
-
-
-def bake_texture(obj):
-    """Атлас цвета текселами, а не вершинами: та же проекция трёх мокапов,
-    но на 1024² точек вместо 10k — ремни и стёжка остаются ремнями и стёжкой.
-    Цвет вершин остаётся запасным на случай, если картинка не доедет."""
-    import numpy as np
-
-    bpy.context.view_layer.objects.active = obj
-    obj.select_set(True)
-    bpy.ops.object.mode_set(mode="EDIT")
-    bpy.ops.mesh.select_all(action="SELECT")
-    bpy.ops.uv.smart_project(angle_limit=math.radians(66), island_margin=0.01)
-    bpy.ops.object.mode_set(mode="OBJECT")
-
-    pos, nrm, island = bake_surface(obj)
-    rgb, covered = project_atlas(obj, pos, nrm, island)
-    rgb = inpaint(rgb, covered, island)
-
-    n = TEXTURE_SIZE
-    atlas = bpy.data.images.new("rusty_albedo", n, n)
-    px = np.ones((n, n, 4), dtype=np.float32)
-    px[:, :, :3] = rgb
-    atlas.pixels.foreach_set(px.ravel())
-    atlas.pack()
-    return atlas
-
-
 def textured_material(name, atlas):
     """Материал кита: альбедо из атласа. Цвет вершин в меш всё равно уходит
     (COLOR_0), но материал на него не ссылается — иначе три перемножит
@@ -523,18 +274,16 @@ def textured_material(name, atlas):
 def build_cat(rig):
     """Корпус и голова из сгенерированного меша, с весами от скелета."""
     obj = import_gen()
-    remesh(obj, BODY_TRIS)
-    paint_from_views(obj)
-    atlas = bake_texture(obj)
+    atlas = load_texture()
+    obj.data.materials.clear()
     obj.data.materials.append(textured_material("rusty_skin", atlas))
 
     body, head = split_head(obj, HEAD_SPLIT_Z)
     body.name = body.data.name = "body_stocky"
     head.name = head.data.name = "head_rusty"
 
-    # Автовеса: тепловая диффузия от костей. На меше из surface nets она не
-    # сходилась, после воксельного ремеша поверхность замкнута — сходится.
-    # Сокеты помечены как недеформирующие и веса не получают.
+    # Автовеса: тепловая диффузия от костей. Сокеты помечены как
+    # недеформирующие и веса не получают.
     bpy.ops.object.select_all(action="DESELECT")
     body.select_set(True)
     head.select_set(True)
@@ -544,45 +293,161 @@ def build_cat(rig):
     for obj in (body, head):
         if not obj.vertex_groups:
             sys.exit(f"{obj.name}: автовеса не легли")
+    # Цвет вершин нужен раньше весов: по нему хвост отличается от подсумка.
+    paint_from_texture(body, atlas)
+    paint_from_texture(head, atlas)
+    confine_tail(body, rig)
+    pin_belt(body, rig)
+    for obj in (body, head):
+        fill_orphans(obj, rig)
+    clean_tail_texture(body, atlas)
+    paint_from_texture(body, atlas)
     return body, head
 
 
-def skin(obj, rig):
-    """Веса по ближайшей кости, с подмесом второй у суставов.
+def fill_orphans(obj, rig):
+    """Вершина без весов — ближайшей кости.
 
-    Тепловая диффузия Blender на этом меше не сходится (после децимации он
-    не замкнут), а костюм жёсткий — стёганка не тянется, как кожа. Ближайшая
-    кость даёт ровно ту жёсткость, которая тут и нужна; подмес второй нужен
-    только чтобы сустав не рвался.
+    Тепловая диффузия не добирается до отдельных замкнутых деталек (бирка
+    на нагрудном ремне), а вершина без весов остаётся в bind-позе и висит в
+    воздухе, когда кот двигается. Страховка на выходе: каждая вершина хоть
+    кому-то принадлежит.
+    """
+    from mathutils.geometry import intersect_point_line
+
+    bones = [b for b in rig.data.bones if b.use_deform]
+    orphans = [v for v in obj.data.vertices if sum(ge.weight for ge in v.groups) < 0.01]
+    for v in orphans:
+        nearest = min(bones, key=lambda b: (intersect_point_line(v.co, b.head_local, b.tail_local)[0] - v.co).length)
+        obj.vertex_groups[nearest.name].add([v.index], 1.0, "REPLACE")
+    if orphans:
+        print(f"  {obj.name}: {len(orphans)} вершин без весов → ближайшая кость")
+
+
+def clean_tail_texture(obj, img, passes=40):
+    """Стереть с хвоста нарисованный на нём подсумок.
+
+    Tripo спроецировал подсумок с концепта на UV-остров хвоста: тёмное пятно
+    у корня, которое машет вместе с хвостом и читается как отлетевшая
+    деталь. Грани хвоста — по весам; их текселы, что темнее меха, заливаются
+    волной от рыжих соседей по тому же острову.
     """
     import numpy as np
 
-    bones = [b for b in rig.data.bones if b.use_deform]
-    heads = np.array([b.head_local[:] for b in bones])
-    tails = np.array([b.tail_local[:] for b in bones])
-    coords = np.array([v.co[:] for v in obj.data.vertices])
+    me = obj.data
+    idx = {g.index: g.name for g in obj.vertex_groups}
+    tail_w = np.zeros(len(me.vertices), dtype=np.float32)
+    for v in me.vertices:
+        tail_w[v.index] = sum(ge.weight for ge in v.groups if idx[ge.group].startswith("tail_"))
 
-    # Расстояние от точки до отрезка кости.
-    ab = tails - heads
-    ab_len2 = np.maximum((ab * ab).sum(axis=1), 1e-9)
-    ap = coords[:, None, :] - heads[None, :, :]
-    t = np.clip((ap * ab[None, :, :]).sum(axis=2) / ab_len2[None, :], 0.0, 1.0)
-    closest = heads[None, :, :] + t[:, :, None] * ab[None, :, :]
-    dist = np.linalg.norm(coords[:, None, :] - closest, axis=2)
+    w, h = img.size
+    px = np.empty(w * h * 4, dtype=np.float32)
+    img.pixels.foreach_get(px)
+    px = px.reshape(h, w, 4)
+    uv = me.uv_layers.active.data
+    mask = np.zeros((h, w), dtype=bool)
+    for poly in me.polygons:
+        if any(tail_w[i] < 0.5 for i in poly.vertices):
+            continue
+        tri = np.array([uv[l].uv[:] for l in poly.loop_indices]) * (w, h)
+        x0, y0 = np.floor(tri.min(axis=0)).astype(int)
+        x1, y1 = np.ceil(tri.max(axis=0)).astype(int)
+        ys, xs = np.mgrid[max(y0, 0):min(y1 + 1, h), max(x0, 0):min(x1 + 1, w)]
+        p = np.stack([xs + 0.5, ys + 0.5], axis=-1)
+        a, b, c = tri
+        det = (b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1])
+        if abs(det) < 1e-9:
+            continue
+        l1 = ((b[0] - p[..., 0]) * (c[1] - p[..., 1]) - (c[0] - p[..., 0]) * (b[1] - p[..., 1])) / det
+        l2 = ((c[0] - p[..., 0]) * (a[1] - p[..., 1]) - (a[0] - p[..., 0]) * (c[1] - p[..., 1])) / det
+        l3 = 1.0 - l1 - l2
+        inside = (l1 >= -0.02) & (l2 >= -0.02) & (l3 >= -0.02)
+        mask[ys[inside], xs[inside]] = True
 
-    order = np.argsort(dist, axis=1)
-    d1 = dist[np.arange(len(coords)), order[:, 0]]
-    d2 = dist[np.arange(len(coords)), order[:, 1]]
-    # Подмес второй кости — только когда она почти так же близко.
-    w2 = np.where(d2 < d1 * 1.5, (d1 / d2) ** 4, 0.0)
-    w1 = 1.0 - w2 * 0.5
-    w2 = w2 * 0.5
+    rgb = px[:, :, :3]
+    fur = rgb[:, :, 0] > rgb[:, :, 2] * 1.45
+    todo = mask & ~fur
+    good = mask & fur
+    print(f"  хвост: {int(mask.sum())} текселов, перекрашено {int(todo.sum())}")
+    shifts = [(dy, dx) for dy in (-1, 0, 1) for dx in (-1, 0, 1) if (dy, dx) != (0, 0)]
+    for _ in range(passes):
+        if not todo.any():
+            break
+        acc = np.zeros_like(rgb)
+        cnt = np.zeros((h, w), dtype=np.float32)
+        for dy, dx in shifts:
+            sc = np.roll(good, (dy, dx), axis=(0, 1))
+            acc += np.roll(rgb, (dy, dx), axis=(0, 1)) * sc[:, :, None]
+            cnt += sc
+        fill = todo & (cnt > 0)
+        rgb[fill] = acc[fill] / cnt[fill][:, None]
+        good |= fill
+        todo &= ~fill
+    img.pixels.foreach_set(px.ravel())
+    img.pack()
 
-    groups = [obj.vertex_groups.new(name=b.name) for b in bones]
-    for i in range(len(coords)):
-        groups[order[i, 0]].add([i], float(w1[i]), "REPLACE")
-        if w2[i] > 0.0:
-            groups[order[i, 1]].add([i], float(w2[i]), "REPLACE")
+
+def pin_belt(obj, rig):
+    """Ремень и всё, что на нём висит сзади, — на тазу, не на ногах.
+
+    Тепловая диффузия отдаёт подсумки на заду бедру: они ближе к нему, чем
+    к кости таза. Но висят они на ремне, и с ягодицей при махе ноги ехать
+    не должны. Всё выше паха с боков и сзади — бедренные веса переходят
+    тазу; спереди правило не действует, там карманы на самих штанах.
+    Корпус у Tripo узкий: спина в 7 см от оси, а подсумок на ремне сзади —
+    на 2–6 см, поэтому «сзади» здесь — всё, что не строго спереди.
+    """
+    hips = obj.vertex_groups[RIG + "Hips"]
+    legs = [obj.vertex_groups[RIG + side + "UpLeg"] for side in ("Left", "Right")]
+    leg_ids = {g.index for g in legs}
+    for v in obj.data.vertices:
+        if v.co.z < L["crotch"] + 0.03 or v.co.y < -0.03:
+            continue
+        moved = sum(ge.weight for ge in v.groups if ge.group in leg_ids)
+        if moved <= 0.0:
+            continue
+        for g in legs:
+            g.remove([v.index])
+        current = next((ge.weight for ge in v.groups if ge.group == hips.index), 0.0)
+        hips.add([v.index], current + moved, "REPLACE")
+
+
+def confine_tail(obj, rig, radius=0.07):
+    """Хвостовые кости тянут только хвост.
+
+    Корень хвоста стоит у самой спины, и тепловая диффузия отдаёт ему всё
+    рядом — подсумок на заду улетал вслед за хвостом. Хвост — это то, что
+    в `radius` от его цепочки, позади спины и рыжее: подсумок на ремне
+    выступает назад ровно на глубину корня хвоста, и геометрией их не
+    развести, а цветом — да, он тёмный. Остальным хвостовые веса
+    снимаются, остаток нормируется по другим костям.
+    """
+    from mathutils.geometry import intersect_point_line
+
+    chain = [rig.data.bones[n] for n in ("tail_1", "tail_2", "tail_3")]
+    behind = chain[0].head_local.y - 0.02
+    groups = {g.name: g for g in obj.vertex_groups if g.name.startswith("tail_")}
+    if not groups:
+        return
+    col = obj.data.color_attributes["Col"].data
+    tail_ids = {g.index for g in groups.values()}
+    for v in obj.data.vertices:
+        d = min((intersect_point_line(v.co, b.head_local, b.tail_local)[0] - v.co).length for b in chain)
+        c = col[v.index].color
+        fur = c[0] > c[2] * 1.45
+        if d <= radius and v.co.y >= behind and fur:
+            continue
+        # Снимать хвост можно только тому, у кого есть другие кости: у
+        # передней поверхности хвоста, обращённой к телу, их нет, и без
+        # весов она осталась бы в bind-позе — кусок хвоста, висящий в
+        # воздухе, пока хвост машет.
+        total = sum(ge.weight for ge in v.groups if ge.group not in tail_ids)
+        if total <= 0.0:
+            continue
+        for g in groups.values():
+            g.remove([v.index])
+        for ge in v.groups:
+            obj.vertex_groups[ge.group].add([v.index], ge.weight / total, "REPLACE")
 
 
 def build_prop(name, parts, mat):
@@ -1100,7 +965,7 @@ def main():
     build_clips(rig)
 
     socket(held, rig, "socket_hand_r", (HAND_R[0], HAND_R[1] - 0.06, HAND_R[2] + 0.02), (0.35, 0, 0))
-    socket(gear, rig, "socket_back", (0, 0.24, L["spine"] + 0.02))
+    socket(gear, rig, "socket_back", (0, 0.27, L["spine"] + 0.02))
 
     tris = 0
     for obj in (body, head, held, gear):
