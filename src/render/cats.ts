@@ -44,8 +44,13 @@ const HEADING: Record<Dir, [number, number]> = {
 // плывущим. Постоянная времени — 55 мс.
 const TURN_RATE = 18
 const HEAD_RATE = 9
-/** Дальше кот не выворачивает голову — иначе внимание читается как поломка. */
-const HEAD_LIMIT = (110 * Math.PI) / 180
+/**
+ * Дальше кот не выворачивает голову — иначе внимание читается как поломка.
+ * На капсуле сходили с рук 110°, у настоящей шеи в капюшоне — нет.
+ */
+const HEAD_LIMIT = (60 * Math.PI) / 180
+/** Доля поворота, которую берёт шея: сустав не один, и поворот делится. */
+const NECK_SHARE = 0.4
 
 function approachAngle(current: number, target: number, rate: number, dt: number): number {
   let d = target - current
@@ -117,6 +122,7 @@ class ModelFigure implements Figure {
   private readonly head: THREE.Bone
   /** Bind-поза головы: рысканье задаётся смещением от неё, а не поверх кадра. */
   private readonly headBase: THREE.Quaternion
+  private readonly neck: THREE.Bone
   private readonly q = new THREE.Quaternion()
   private readonly e = new THREE.Euler()
   private playing: CatView['action'] | null = null
@@ -134,6 +140,7 @@ class ModelFigure implements Figure {
 
     this.head = bone(rig, 'mixamorig:Head')
     this.headBase = this.head.quaternion.clone()
+    this.neck = bone(rig, 'mixamorig:Neck')
   }
 
   /**
@@ -155,8 +162,12 @@ class ModelFigure implements Figure {
     // Клипы кость головы не трогают именно затем, чтобы взгляд остался за
     // рантаймом: иначе трек затирал бы внимание кота каждый кадр.
     this.head.quaternion.copy(this.headBase).multiply(
-      this.q.setFromEuler(this.e.set(0, offset, 0)),
+      this.q.setFromEuler(this.e.set(0, offset * (1 - NECK_SHARE), 0)),
     )
+    // Шею клипы анимируют (наклон корпуса), поэтому её доля — поверх того,
+    // что поставил микшер в этом кадре, а не от bind-позы. Микшер каждый
+    // кадр пишет заново, накопления нет.
+    this.neck.quaternion.multiply(this.q.setFromEuler(this.e.set(0, offset * NECK_SHARE, 0)))
   }
 
   animate(action: CatView['action'], dt: number, speed: number): void {
