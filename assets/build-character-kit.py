@@ -172,9 +172,6 @@ HEAD_PARTS = {PART["head"], 15, 16, 17, 18, 19, 20}
 # Жёсткие детали: вся часть — на одной кости, ей нечего гнуть. Сторона у
 # бедренных подсумков — по знаку X центроида, чтобы не путать лево и право.
 RIGID_PARTS = {
-    # Капюшон и воротник остаются на плечах, голова крутится внутри: иначе
-    # воротник скручивается вслед за ней и отходит от куртки над плечом.
-    PART["hood"]: RIG + "Spine1",
     PART["thigh_pouch_l"]: "UpLeg", PART["thigh_pouch_r"]: "UpLeg",
     PART["belt_pouch_front"]: RIG + "Hips", PART["belt_pouch_side"]: RIG + "Hips",
     PART["belt_pouch_back"]: RIG + "Hips", PART["chest_tag"]: RIG + "Spine1",
@@ -348,11 +345,36 @@ def build_cat(rig):
             sys.exit(f"{obj.name}: автовеса не легли")
     confine_tail(body, rig)
     pin_rigid_parts(body, rig)
+    free_hood_from_head(body)
     for obj in (body, head):
         fill_orphans(obj, rig)
     paint_from_texture(body, atlas)
     paint_from_texture(head, atlas)
     return body, head
+
+
+def free_hood_from_head(obj):
+    """Капюшон наклоняется с шеей, но не крутится с головой.
+
+    Жёстко на груди он не годится: шея в клипах откидывается назад,
+    компенсируя наклон корпуса, и выходит из стоячего воротника сзади.
+    А с весами головы воротник скручивается при рыскании и отходит от
+    куртки над плечом. Поэтому у капюшона снимаются только веса Head —
+    рысканье рантайм целиком кладёт на голову, шею не вращает.
+    """
+    head = obj.vertex_groups.get(RIG + "Head")
+    if head is None:
+        return
+    per_vertex = vertex_parts(obj)
+    for v in obj.data.vertices:
+        if PART["hood"] not in per_vertex[v.index]:
+            continue
+        rest = sum(ge.weight for ge in v.groups if ge.group != head.index)
+        if rest <= 0.0:
+            continue
+        head.remove([v.index])
+        for ge in v.groups:
+            obj.vertex_groups[ge.group].add([v.index], ge.weight / rest, "REPLACE")
 
 
 def pin_rigid_parts(obj, rig):

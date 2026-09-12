@@ -49,8 +49,12 @@ const HEAD_RATE = 9
  * На капсуле сходили с рук 110°, у настоящей шеи в капюшоне — нет.
  */
 const HEAD_LIMIT = (60 * Math.PI) / 180
-/** Доля поворота, которую берёт шея: сустав не один, и поворот делится. */
-const NECK_SHARE = 0.4
+/**
+ * Доля рысканья на шее — ноль: воротник капюшона весит на шее, и любой
+ * её поворот скручивает его вслед за головой. Наклон шеи из клипов при
+ * этом остаётся — капюшон наклоняется вместе с ней.
+ */
+const NECK_SHARE = 0
 
 function approachAngle(current: number, target: number, rate: number, dt: number): number {
   let d = target - current
