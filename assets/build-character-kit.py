@@ -427,6 +427,77 @@ def confine_tail(obj, rig):
             g.remove([v.index])
         for ge in v.groups:
             obj.vertex_groups[ge.group].add([v.index], ge.weight / total, "REPLACE")
+PROP_TRIS = 800
+PROP_TEXTURE = 512
+
+
+def import_prop(name, filename, length, grip_top=True):
+    """Сгенерированный пропс (Tripo text→3D через AssetHub) под сокет.
+
+    Модель приходит в случайной ориентации; здесь она выравнивается по
+    главной оси (PCA по вершинам) — рукоятью вверх, если `grip_top`:
+    рукоять — тот конец, где сечение тоньше. Начало координат — в хвате,
+    чуть ниже верха: за него сокет ладони и держит. Длина нормируется,
+    карта ужимается до PROP_TEXTURE, полигоны — под PROP_TRIS.
+    """
+    import numpy as np
+
+    before = set(bpy.data.objects)
+    bpy.ops.import_scene.gltf(filepath=os.path.join(GEN_DIR, filename))
+    meshes = [o for o in set(bpy.data.objects) - before if o.type == "MESH"]
+    obj = meshes[0]
+    for o in set(bpy.data.objects) - before:
+        if o.type != "MESH":
+            bpy.data.objects.remove(o)
+    bpy.context.view_layer.objects.active = obj
+    obj.select_set(True)
+    bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+    obj.name = obj.data.name = name
+
+    me = obj.data
+    pts = np.array([v.co[:] for v in me.vertices])
+    centre = pts.mean(axis=0)
+    _, _, vt = np.linalg.svd(pts - centre, full_matrices=False)
+    axis = vt[0]
+    along = (pts - centre) @ axis
+    # Толщина концов: разброс поперёк оси у крайних 15 % длины.
+    lo, hi = along.min(), along.max()
+    def girth(mask):
+        q = pts[mask] - centre
+        return np.linalg.norm(q - np.outer(q @ axis, axis), axis=1).mean()
+    thin_end_positive = girth(along > hi - 0.15 * (hi - lo)) < girth(along < lo + 0.15 * (hi - lo))
+    if thin_end_positive != grip_top:
+        axis = -axis
+    up = Vector(axis.tolist())
+    rot = up.rotation_difference(Vector((0, 0, 1)))
+    k = length / (hi - lo)
+    for v in me.vertices:
+        v.co = rot @ ((v.co - Vector(centre.tolist())) * k)
+    zs = [v.co.z for v in me.vertices]
+    top = max(zs)
+    grip = top - 0.06 * length
+    for v in me.vertices:
+        v.co.z -= grip
+    for poly in me.polygons:
+        poly.use_smooth = True
+
+    now = sum(len(p.vertices) - 2 for p in me.polygons)
+    if now > PROP_TRIS:
+        d = obj.modifiers.new("dec", "DECIMATE")
+        d.ratio = PROP_TRIS / now
+        bpy.ops.object.modifier_apply(modifier="dec")
+
+    for mat in me.materials:
+        for node in mat.node_tree.nodes:
+            if node.type == "TEX_IMAGE" and node.image is not None:
+                img = node.image
+                img.name = name + "_albedo"
+                if img.size[0] > PROP_TEXTURE:
+                    img.scale(PROP_TEXTURE, PROP_TEXTURE)
+                img.pack()
+    return obj
+
+
 def build_prop(name, parts, mat):
     verts, faces = [], []
     for pv, pf, _ in parts:
@@ -941,11 +1012,7 @@ def main():
 
     # Пылесос: ранец на спине и раструб в правой лапе. Рабочий цикл строится
     # от предмета, поэтому предмет существует как отдельный объект в сокете.
-    held = build_prop("held_vacuum", [
-        box((0, 0, 0), (0.07, 0.07, 0.10), None),          # хват
-        box((0, -0.01, -0.18), (0.07, 0.07, 0.28), None),  # труба
-        box((0, -0.05, -0.35), (0.17, 0.17, 0.06), None),  # раструб
-    ], m_gear)
+    held = import_prop("held_vacuum", "held_vacuum.glb", length=0.62)
     gear = build_prop("gear_vacuum", [
         box((0, 0, 0), (0.24, 0.15, 0.26), None),          # бак
         box((0, 0, 0.15), (0.18, 0.11, 0.05), None),       # крышка

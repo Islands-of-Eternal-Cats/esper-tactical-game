@@ -180,17 +180,17 @@ describe('character-kit.glb', () => {
     }
   })
 
-  it('красит кота атласом с мокапов, цвет вершин — запасной', () => {
-    // Атлас 1024² — проекция трёх ракурсов текселами: ремни и стёжка
-    // остаются ремнями и стёжкой. Цвет вершин в меше лежит на случай, если
-    // картинка не доедет; рантайм гасит его, когда атлас есть.
+  it('красит кота картой, цвет вершин — запасной', () => {
+    // Карта Tripo 512² с UV генератора. Цвет вершин в меше лежит на случай,
+    // если картинка не доедет; рантайм гасит его, когда карта есть.
     for (const name of ['head_rusty', 'body_stocky']) {
       const mesh = json.meshes.find((m) => m.name === name)
       expect(mesh?.primitives[0]?.attributes.COLOR_0, `${name} без цвета вершин`).toBeDefined()
       expect(mesh?.primitives[0]?.attributes.TEXCOORD_0, `${name} без UV`).toBeDefined()
     }
-    expect(json.images ?? []).toHaveLength(1)
-    expect(json.images?.[0]?.mimeType).toBe('image/jpeg')
+    // Одна карта на кота, по одной на сгенерированный пропс — не больше:
+    // каждая лишняя картинка — это и вес, и отдельный вызов рисования.
+    expect((json.images ?? []).length).toBeLessThanOrEqual(3)
   })
 
   it('укладывается в бюджеты техплана', () => {
@@ -198,8 +198,10 @@ describe('character-kit.glb', () => {
     // build-character-kit.py. Меньше — теряются уши и ремни.
     const cat = triangles('head_rusty') + triangles('body_stocky')
     expect(cat).toBeLessThanOrEqual(12000)
-    expect(triangles('held_vacuum')).toBeLessThanOrEqual(200)
-    expect(triangles('gear_vacuum')).toBeLessThanOrEqual(200)
+    // Пропсы в лапе и на спине — «геройские», в кадре всегда: под них
+    // генерация оправдана, и бюджет выше болваночных 200.
+    expect(triangles('held_vacuum')).toBeLessThanOrEqual(900)
+    expect(triangles('gear_vacuum')).toBeLessThanOrEqual(900)
     // Атлас JPEG 1024² — основная часть веса.
     expect(bytes / 1024).toBeLessThanOrEqual(1200)
   })

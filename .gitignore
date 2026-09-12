@@ -6,4 +6,5 @@ dist/
 
 # Сгенерированные исходники (Hunyuan3D): тяжёлые, воспроизводятся из mocks/ и workflow
 assets/gen/*.glb
+!assets/gen/tripo/*.glb
 __pycache__/
