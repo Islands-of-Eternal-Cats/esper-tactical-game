@@ -57,7 +57,14 @@ export class CatKit {
     root.traverse((o) => {
       if ((o as THREE.Bone).isBone) bones.set(o.name, o as THREE.Bone)
       // Кит несёт все головы и корпуса сразу; кот показывает свои.
-      else if (o instanceof THREE.Mesh) o.visible = wanted.has(o.name)
+      else if (o instanceof THREE.Mesh) {
+        o.visible = wanted.has(o.name)
+        // Цвет вершин в меше — запасной, на случай, если атлас не доехал.
+        // Загрузчик включает его всегда, когда есть COLOR_0, и тогда он
+        // перемножается с текстурой — кот темнеет вдвое.
+        const mat = o.material
+        if (mat instanceof THREE.MeshStandardMaterial && mat.map !== null) mat.vertexColors = false
+      }
     })
 
     return { root, bones, clips: this.clips }

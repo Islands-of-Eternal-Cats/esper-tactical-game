@@ -1,8 +1,9 @@
 /**
- * Ортографическая камера, зафиксированный изометрический угол, без вращения.
+ * Ортографическая камера, зафиксированный изометрический угол.
  *
- * Вращения нет намеренно: двор — читаемая схема, а не пространство, в котором
- * игрок ищет удобный ракурс.
+ * Вращения в игре нет намеренно: двор — читаемая схема, а не пространство, в
+ * котором игрок ищет удобный ракурс. Азимут крутится только для отладки —
+ * посмотреть веса и текстуру с боков и со спины; наклон не меняется никогда.
  */
 
 import * as THREE from 'three'
@@ -22,6 +23,10 @@ const MAX_ZOOM = 8
  */
 const VIEW_SIZE = 21
 
+/** Азимут изометрии: камера в (1, 1, 1), то есть 45° от оси X. */
+const ISO_AZIMUTH = Math.PI / 4
+const ROTATE_STEP = Math.PI / 12
+
 const UP = new THREE.Vector3(0, 1, 0)
 const GROUND = new THREE.Plane(UP, 0)
 
@@ -29,6 +34,7 @@ export class IsoCamera {
   readonly camera: THREE.OrthographicCamera
   private readonly target = new THREE.Vector3()
   private zoom = 1
+  private azimuth = ISO_AZIMUTH
   private width = 1
   private height = 1
   private readonly raycaster = new THREE.Raycaster()
@@ -51,8 +57,12 @@ export class IsoCamera {
     this.camera.top = half
     this.camera.bottom = -half
 
-    // Направление зафиксировано раз и навсегда.
-    const dir = new THREE.Vector3(1, 1, 1).normalize().multiplyScalar(60)
+    // Наклон зафиксирован раз и навсегда: горизонтальная составляющая √2
+    // на единицу высоты — это (1, 1, 1). Меняется только азимут, и только
+    // для отладки.
+    const dir = new THREE.Vector3(
+      Math.SQRT2 * Math.cos(this.azimuth), 1, Math.SQRT2 * Math.sin(this.azimuth),
+    ).normalize().multiplyScalar(60)
     this.camera.position.copy(this.target).add(dir)
     this.camera.lookAt(this.target)
     this.camera.updateProjectionMatrix()
@@ -67,6 +77,12 @@ export class IsoCamera {
 
   lookAtCentre(x: number, z: number): void {
     this.target.set(x, 0, z)
+    this.apply()
+  }
+
+  /** Отладка: повернуть камеру вокруг цели на шаг; `0` — вернуть изометрию. */
+  rotate(steps: number): void {
+    this.azimuth = steps === 0 ? ISO_AZIMUTH : this.azimuth + steps * ROTATE_STEP
     this.apply()
   }
 

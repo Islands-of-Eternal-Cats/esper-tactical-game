@@ -139,6 +139,17 @@ export class SceneView {
       e.preventDefault()
       this.view.zoomBy(e.deltaY)
     }, { passive: false })
+
+    // Отладочный поворот камеры: Q/E — на 15°, R — назад в изометрию.
+    window.addEventListener('keydown', (e) => {
+      const target = e.target
+      if (target instanceof HTMLElement && (target.tagName === 'INPUT' || target.isContentEditable)) return
+      // `code` не зависит от раскладки; `key` выручает, когда события
+      // синтетические и `code` пуст — как у цифр скорости в HUD.
+      if (e.code === 'KeyQ' || e.key === 'q') this.view.rotate(-1)
+      else if (e.code === 'KeyE' || e.key === 'e') this.view.rotate(1)
+      else if (e.code === 'KeyR' || e.key === 'r') this.view.rotate(0)
+    })
   }
 
   private cellAt(clientX: number, clientY: number): Cell | null {

@@ -320,13 +320,213 @@ def vertex_colour_material(name):
     return mat
 
 
+TEXTURE_SIZE = 1024
+
+
+def view_pixels():
+    """Ракурсы в numpy: пиксели (снизу вверх, как у Blender), рамка силуэта в
+    долях 0..1 и оси. Зеркальный ракурс — отражённые пиксели."""
+    import numpy as np
+
+    out = []
+    for fname, direction, right, mirror in VIEWS:
+        img = bpy.data.images.load(os.path.join(ROOT, "assets", "gen", fname))
+        w, h = img.size
+        px = np.empty(w * h * 4, dtype=np.float32)
+        img.pixels.foreach_get(px)
+        bpy.data.images.remove(img)
+        px = px.reshape(h, w, 4)
+        if mirror:
+            px = px[:, ::-1]
+        alpha = px[:, :, 3] > 0.9
+        rows = np.where(alpha.any(axis=1))[0]
+        cols = np.where(alpha.any(axis=0))[0]
+        frame = (cols.min(), cols.max() + 1, rows.min(), rows.max() + 1)
+        out.append((px, np.array(direction[:]), np.array(right[:]), frame))
+    return out
+
+
+def bake_surface(obj):
+    """Позиция и нормаль каждого тексела атласа — запеканием эмиссии.
+
+    Дальше вся проекция считается в numpy: там есть луч на каждый тексел и
+    заливка по островам, а в нодах ни того, ни другого.
+    """
+    import numpy as np
+
+    n = TEXTURE_SIZE
+    mat = bpy.data.materials.new("rusty_surface")
+    mat.use_nodes = True
+    nodes, links = mat.node_tree.nodes, mat.node_tree.links
+    nodes.clear()
+    tex = nodes.new("ShaderNodeTexCoord")
+    geo = nodes.new("ShaderNodeNewGeometry")
+    emit = nodes.new("ShaderNodeEmission")
+    out = nodes.new("ShaderNodeOutputMaterial")
+    links.new(emit.outputs[0], out.inputs["Surface"])
+    target = nodes.new("ShaderNodeTexImage")
+    nodes.active = target
+    obj.data.materials.clear()
+    obj.data.materials.append(mat)
+
+    scene = bpy.context.scene
+    scene.render.engine = "CYCLES"
+    scene.cycles.device = "CPU"
+    scene.cycles.samples = 1
+    scene.render.bake.margin = 0
+    bpy.context.view_layer.objects.active = obj
+    obj.select_set(True)
+
+    def bake(name, source):
+        img = bpy.data.images.new(name, n, n, alpha=True, float_buffer=True)
+        img.generated_color = (0.0, 0.0, 0.0, 0.0)
+        img.colorspace_settings.name = "Non-Color"
+        target.image = img
+        links.new(source, emit.inputs["Color"])
+        bpy.ops.object.bake(type="EMIT")
+        px = np.empty(n * n * 4, dtype=np.float32)
+        img.pixels.foreach_get(px)
+        bpy.data.images.remove(img)
+        return px.reshape(n, n, 4)
+
+    pos = bake("bake_position", tex.outputs["Object"])
+    nrm = bake("bake_normal", geo.outputs["Normal"])
+    obj.data.materials.clear()
+    bpy.data.materials.remove(mat)
+    # Альфа единица там, куда легли острова UV; остальное — поля.
+    return pos[:, :, :3], nrm[:, :, :3], pos[:, :, 3] > 0.5
+
+
+def visibility(obj, pos, nrm, island, direction):
+    """Видимость текселов из ракурса: луч от точки к камере, упёрся в меш —
+    закрыт. Считается на текселах, а не вершинах: на крупных гранях бока
+    интерполяция по вершинам пропускала рукав призраком."""
+    import numpy as np
+    from mathutils import Vector
+    from mathutils.bvhtree import BVHTree
+
+    bvh = BVHTree.FromObject(obj, bpy.context.evaluated_depsgraph_get())
+    back = Vector((-direction).tolist())
+    vis = np.zeros(pos.shape[:2], dtype=bool)
+    ys, xs = np.where(island)
+    for y, x in zip(ys.tolist(), xs.tolist()):
+        p = pos[y, x]
+        nv = nrm[y, x]
+        origin = Vector((p[0] + nv[0] * 0.003, p[1] + nv[1] * 0.003, p[2] + nv[2] * 0.003))
+        hit, *_ = bvh.ray_cast(origin, back, 5.0)
+        vis[y, x] = hit is None
+    return vis
+
+
+def project_atlas(obj, pos, nrm, island):
+    """Цвет тексела — взвешенное среднее ракурсов: вес — квадрат косинуса
+    нормали к камере плюс малая константа (макушку никто не видит прямо),
+    ноль за силуэтом и там, где ракурс закрыт самим мешем."""
+    import numpy as np
+
+    lo, hi = pos[island].min(axis=0), pos[island].max(axis=0)
+    acc = np.zeros(pos.shape, dtype=np.float32)
+    wsum = np.zeros(pos.shape[:2], dtype=np.float32)
+    for px, direction, right, (c0, c1, r0, r1) in view_pixels():
+        h, w = px.shape[:2]
+        un = (pos @ right - min(lo @ right, hi @ right)) / abs(hi @ right - lo @ right)
+        vn = (pos[:, :, 2] - lo[2]) / (hi[2] - lo[2])
+        col = np.clip((c0 + un * (c1 - c0)).astype(int), 0, w - 1)
+        row = np.clip((r0 + vn * (r1 - r0)).astype(int), 0, h - 1)
+        sample = px[row, col]
+        facing = np.clip(-(nrm @ direction), 0.0, None)
+        weight = (facing * facing + 0.04) * (sample[:, :, 3] > 0.9) * island
+        weight = weight * visibility(obj, pos, nrm, island, direction)
+        acc += sample[:, :, :3] * weight[:, :, None]
+        wsum += weight
+    covered = wsum > 1e-4
+    rgb = np.where(covered[:, :, None], acc / np.maximum(wsum, 1e-4)[:, :, None], 0.0)
+    return rgb.astype(np.float32), covered
+
+
+def inpaint(rgb, covered, island, passes=64):
+    """Дорисовать непокрытое волной от покрытых соседей — сначала строго
+    внутри острова UV, потом наружу в поля. Через границу острова в атласе
+    соседи принадлежат другой части тела: без ограничения на бок затягивало
+    куски рукава."""
+    import numpy as np
+
+    shifts = [(dy, dx) for dy in (-1, 0, 1) for dx in (-1, 0, 1) if (dy, dx) != (0, 0)]
+
+    def grow(rgb, covered, allowed):
+        for _ in range(passes):
+            todo = allowed & ~covered
+            if not todo.any():
+                break
+            acc = np.zeros_like(rgb)
+            cnt = np.zeros(covered.shape, dtype=np.float32)
+            for dy, dx in shifts:
+                sc = np.roll(covered, (dy, dx), axis=(0, 1))
+                acc += np.roll(rgb, (dy, dx), axis=(0, 1)) * sc[:, :, None]
+                cnt += sc
+            fill = todo & (cnt > 0)
+            rgb[fill] = acc[fill] / cnt[fill][:, None]
+            covered = covered | fill
+        return rgb, covered
+
+    rgb, covered = grow(rgb, covered & island, island)
+    rgb[island & ~covered] = RUSTY[:3]
+    covered |= island
+    # Поля островов: запекание без margin, цвет вокруг вытягивается отсюда —
+    # без швов на мипах.
+    rgb, covered = grow(rgb, covered, np.ones_like(island))
+    return rgb
+
+
+def bake_texture(obj):
+    """Атлас цвета текселами, а не вершинами: та же проекция трёх мокапов,
+    но на 1024² точек вместо 10k — ремни и стёжка остаются ремнями и стёжкой.
+    Цвет вершин остаётся запасным на случай, если картинка не доедет."""
+    import numpy as np
+
+    bpy.context.view_layer.objects.active = obj
+    obj.select_set(True)
+    bpy.ops.object.mode_set(mode="EDIT")
+    bpy.ops.mesh.select_all(action="SELECT")
+    bpy.ops.uv.smart_project(angle_limit=math.radians(66), island_margin=0.01)
+    bpy.ops.object.mode_set(mode="OBJECT")
+
+    pos, nrm, island = bake_surface(obj)
+    rgb, covered = project_atlas(obj, pos, nrm, island)
+    rgb = inpaint(rgb, covered, island)
+
+    n = TEXTURE_SIZE
+    atlas = bpy.data.images.new("rusty_albedo", n, n)
+    px = np.ones((n, n, 4), dtype=np.float32)
+    px[:, :, :3] = rgb
+    atlas.pixels.foreach_set(px.ravel())
+    atlas.pack()
+    return atlas
+
+
+def textured_material(name, atlas):
+    """Материал кита: альбедо из атласа. Цвет вершин в меш всё равно уходит
+    (COLOR_0), но материал на него не ссылается — иначе три перемножит
+    текстуру с цветом вершин, и кот потемнеет вдвое."""
+    mat = bpy.data.materials.new(name)
+    mat.use_nodes = True
+    nodes = mat.node_tree.nodes
+    bsdf = nodes["Principled BSDF"]
+    it = nodes.new("ShaderNodeTexImage")
+    it.image = atlas
+    mat.node_tree.links.new(it.outputs["Color"], bsdf.inputs["Base Color"])
+    bsdf.inputs["Roughness"].default_value = 0.9
+    bsdf.inputs["Metallic"].default_value = 0.0
+    return mat
+
+
 def build_cat(rig):
     """Корпус и голова из сгенерированного меша, с весами от скелета."""
     obj = import_gen()
     remesh(obj, BODY_TRIS)
     paint_from_views(obj)
-    mat = vertex_colour_material("rusty_skin")
-    obj.data.materials.append(mat)
+    atlas = bake_texture(obj)
+    obj.data.materials.append(textured_material("rusty_skin", atlas))
 
     body, head = split_head(obj, HEAD_SPLIT_Z)
     body.name = body.data.name = "body_stocky"
@@ -912,6 +1112,9 @@ def main():
     bpy.ops.export_scene.gltf(
         filepath=GLB,
         export_format="GLB",
+        # Атлас — JPEG: альфы нет, 1024² в PNG весил бы мегабайт с лишним.
+        export_image_format="JPEG",
+        export_jpeg_quality=85,
         export_yup=True,
         export_apply=True,
         export_skins=True,
