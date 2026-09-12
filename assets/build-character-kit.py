@@ -431,14 +431,16 @@ PROP_TRIS = 800
 PROP_TEXTURE = 512
 
 
-def import_prop(name, filename, length, grip_top=True):
+def import_prop(name, filename, length, grip_top=True, align=True, origin="grip"):
     """Сгенерированный пропс (Tripo text→3D через AssetHub) под сокет.
 
-    Модель приходит в случайной ориентации; здесь она выравнивается по
-    главной оси (PCA по вершинам) — рукоятью вверх, если `grip_top`:
-    рукоять — тот конец, где сечение тоньше. Начало координат — в хвате,
-    чуть ниже верха: за него сокет ладони и держит. Длина нормируется,
-    карта ужимается до PROP_TEXTURE, полигоны — под PROP_TRIS.
+    `align` — выровнять по главной оси (PCA по вершинам): рукоятью вверх,
+    если `grip_top` — рукоять там, где сечение тоньше. Без `align` модель
+    остаётся как сгенерирована (ранец уже стоит вертикально, лямками к
+    спине). Начало координат — `grip`: в хвате чуть ниже верха, за него
+    держит сокет ладони; `bottom`: в центре дна, им пропс ставится на сокет.
+    Длина нормируется, карта ужимается до PROP_TEXTURE, полигоны — под
+    PROP_TRIS.
     """
     import numpy as np
 
@@ -457,27 +459,32 @@ def import_prop(name, filename, length, grip_top=True):
     me = obj.data
     pts = np.array([v.co[:] for v in me.vertices])
     centre = pts.mean(axis=0)
-    _, _, vt = np.linalg.svd(pts - centre, full_matrices=False)
-    axis = vt[0]
-    along = (pts - centre) @ axis
-    # Толщина концов: разброс поперёк оси у крайних 15 % длины.
-    lo, hi = along.min(), along.max()
-    def girth(mask):
-        q = pts[mask] - centre
-        return np.linalg.norm(q - np.outer(q @ axis, axis), axis=1).mean()
-    thin_end_positive = girth(along > hi - 0.15 * (hi - lo)) < girth(along < lo + 0.15 * (hi - lo))
-    if thin_end_positive != grip_top:
-        axis = -axis
-    up = Vector(axis.tolist())
-    rot = up.rotation_difference(Vector((0, 0, 1)))
+    if align:
+        _, _, vt = np.linalg.svd(pts - centre, full_matrices=False)
+        axis = vt[0]
+        along = (pts - centre) @ axis
+        # Толщина концов: разброс поперёк оси у крайних 15 % длины.
+        lo, hi = along.min(), along.max()
+        def girth(mask):
+            q = pts[mask] - centre
+            return np.linalg.norm(q - np.outer(q @ axis, axis), axis=1).mean()
+        thin_end_positive = girth(along > hi - 0.15 * (hi - lo)) < girth(along < lo + 0.15 * (hi - lo))
+        if thin_end_positive != grip_top:
+            axis = -axis
+        rot = Vector(axis.tolist()).rotation_difference(Vector((0, 0, 1)))
+    else:
+        lo, hi = pts[:, 2].min(), pts[:, 2].max()
+        # Как сгенерировано, только на четверть оборота: у Tripo широкая
+        # панель с полосой смотрит в +X, а снаружи, со спины, должна быть
+        # видна она — лямки уходят вбок, под руку.
+        rot = Quaternion((0.0, 0.0, 1.0), math.pi / 2)
     k = length / (hi - lo)
     for v in me.vertices:
         v.co = rot @ ((v.co - Vector(centre.tolist())) * k)
     zs = [v.co.z for v in me.vertices]
-    top = max(zs)
-    grip = top - 0.06 * length
+    shift = max(zs) - 0.06 * length if origin == "grip" else min(zs)
     for v in me.vertices:
-        v.co.z -= grip
+        v.co.z -= shift
     for poly in me.polygons:
         poly.use_smooth = True
 
@@ -1013,16 +1020,12 @@ def main():
     # Пылесос: ранец на спине и раструб в правой лапе. Рабочий цикл строится
     # от предмета, поэтому предмет существует как отдельный объект в сокете.
     held = import_prop("held_vacuum", "held_vacuum.glb", length=0.62)
-    gear = build_prop("gear_vacuum", [
-        box((0, 0, 0), (0.24, 0.15, 0.26), None),          # бак
-        box((0, 0, 0.15), (0.18, 0.11, 0.05), None),       # крышка
-        box((0, -0.03, 0.22), (0.06, 0.06, 0.10), None),   # шланг через плечо
-    ], m_gear)
+    gear = import_prop("gear_vacuum", "gear_vacuum.glb", length=0.40, align=False, origin="bottom")
     build_clips(rig)
 
     socket(held, rig, "socket_hand_r", (HAND_R[0], HAND_R[1] - 0.06, HAND_R[2] + 0.02), (0.35, 0, 0))
-    # Дно бака — у ремня, бак прижат к спине (задняя поверхность ~0.12).
-    socket(gear, rig, "socket_back", (0, 0.22, L["hips"] + 0.10))
+    # Дно бака — у ремня, лямки прижаты к спине (задняя поверхность ~0.12).
+    socket(gear, rig, "socket_back", (0, 0.24, L["hips"] - 0.02))
 
     tris = 0
     for obj in (body, head, held, gear):
