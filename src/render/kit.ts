@@ -401,17 +401,21 @@ export class Kit {
 
       for (let i = 0; i < shown; i++) {
         // Обломки лежат ярусами: верхние уходят первыми, и куча оседает,
-        // а не выцветает равномерно.
-        const level = Math.floor(i / 3)
+        // а не выцветает равномерно. Нижний ярус — пять штук россыпью по
+        // клетке, второй — ещё два сверху, последний — один на макушке:
+        // так куча читается кучей, а не столбиком.
+        const level = i < 5 ? 0 : i < 7 ? 1 : 2
         const angle = hash01(pile.id, i * 3 + 1) * Math.PI * 2
-        const radius = (0.32 - level * 0.09) * (0.55 + hash01(pile.id, i * 3) * 0.45)
-        const size = 0.85 + hash01(pile.id, i * 7) * 0.5
+        const radius = level === 0
+          ? 0.22 + hash01(pile.id, i * 3) * 0.2
+          : level === 1 ? 0.08 + hash01(pile.id, i * 3) * 0.1 : 0.03
+        const size = 0.8 + hash01(pile.id, i * 7) * 0.4
         // Последний обломок доживает свой объём, уменьшаясь.
         const tail = i === shown - 1 ? Math.max(0.35, fraction * CHUNKS - (shown - 1)) : 1
 
         this.pos.set(
           centre.x + Math.cos(angle) * radius,
-          0.1 + level * 0.15,
+          level * 0.2,
           centre.z + Math.sin(angle) * radius,
         )
         this.q.setFromAxisAngle(AXIS_Y, hash01(pile.id, i * 11) * Math.PI * 2)
