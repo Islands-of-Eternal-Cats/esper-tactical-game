@@ -123,6 +123,8 @@ class ModelFigure implements Figure {
   /** Bind-поза головы: рысканье задаётся смещением от неё, а не поверх кадра. */
   private readonly headBase: THREE.Quaternion
   private readonly neck: THREE.Bone
+  /** Обратный к доле шеи прошлого кадра: снять её, прежде чем класть новую. */
+  private readonly neckUndo = new THREE.Quaternion()
   private readonly q = new THREE.Quaternion()
   private readonly e = new THREE.Euler()
   private playing: CatView['action'] | null = null
@@ -165,12 +167,18 @@ class ModelFigure implements Figure {
       this.q.setFromEuler(this.e.set(0, offset * (1 - NECK_SHARE), 0)),
     )
     // Шею клипы анимируют (наклон корпуса), поэтому её доля — поверх того,
-    // что поставил микшер в этом кадре, а не от bind-позы. Микшер каждый
-    // кадр пишет заново, накопления нет.
-    this.neck.quaternion.multiply(this.q.setFromEuler(this.e.set(0, offset * NECK_SHARE, 0)))
+    // что поставил микшер, а не от bind-позы. Но пишет её микшер не в
+    // каждом клипе: постоянные каналы из экспорта выброшены, и в work трека
+    // шеи нет. Поэтому прошлый поворот снимается в animate() до микшера —
+    // иначе он копился бы кадр за кадром, пока голова не уедет на спину.
+    this.q.setFromEuler(this.e.set(0, offset * NECK_SHARE, 0))
+    this.neck.quaternion.multiply(this.q)
+    this.neckUndo.copy(this.q).invert()
   }
 
   animate(action: CatView['action'], dt: number, speed: number): void {
+    this.neck.quaternion.multiply(this.neckUndo)
+    this.neckUndo.identity()
     if (action !== this.playing) {
       const next = this.clips.get(action)
       if (next !== undefined) {
