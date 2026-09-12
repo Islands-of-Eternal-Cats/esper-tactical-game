@@ -23,7 +23,8 @@ const DRAG_SLOP = 4
 
 export class SceneView {
   private readonly renderer: THREE.WebGLRenderer
-  private readonly scene = new THREE.Scene()
+  /** Публично только ради отладки из консоли (см. main.ts). */
+  readonly scene = new THREE.Scene()
   private readonly view = new IsoCamera()
   private world: WorldView
   private kit: Kit
@@ -149,6 +150,7 @@ export class SceneView {
       if (e.code === 'KeyQ' || e.key === 'q') this.view.rotate(-1)
       else if (e.code === 'KeyE' || e.key === 'e') this.view.rotate(1)
       else if (e.code === 'KeyR' || e.key === 'r') this.view.rotate(0)
+      else if (e.code === 'KeyF' || e.key === 'f') this.follow = !this.follow
     })
   }
 
@@ -184,12 +186,19 @@ export class SceneView {
     this.view.resize(w, h)
   }
 
+  /** Отладка: камера идёт за котом. Панорама при этом бесполезна. */
+  private follow = false
+
   /** `dt` — реальное время кадра в секундах, умноженное на скорость. */
   render(snap: Snapshot | null, dt: number): void {
     if (this.contextLost) return
     if (snap !== null) {
       this.kit.sync(snap)
       this.cats.sync(snap, dt)
+      if (this.follow) {
+        const p = this.cats.positionOf(snap.cats[0]?.id ?? '')
+        if (p !== null) this.view.lookAtCentre(p.x, p.z)
+      }
     }
     this.renderer.render(this.scene, this.view.camera)
   }

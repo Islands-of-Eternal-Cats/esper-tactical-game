@@ -63,9 +63,6 @@ L = {
     "tail": [(0.04, 0.18, 0.58), (0.10, 0.21, 0.42), (0.15, 0.23, 0.26), (0.24, 0.28, 0.10)],
     "ear": ((0.07, -0.07, 1.12), (0.085, -0.07, 1.20)),
 }
-# Граница головы и корпуса: выше — head_rusty, ниже — body_stocky. Чуть выше
-# шеи, чтобы воротник капюшона остался на корпусе.
-HEAD_SPLIT_Z = 0.98
 
 # --------------------------------------------------------------------------
 # Скелет. head → tail, родитель, срастаться ли с родителем.
@@ -158,6 +155,56 @@ def build_armature():
 GEN_DIR = os.path.join(ROOT, "assets", "gen", "tripo")
 GEN = os.path.join(GEN_DIR, "rusty.obj")
 GEN_TEXTURE = os.path.join(GEN_DIR, "rusty_basecolor.jpg")
+# Разметка граней по частям — сегментация Tripo (AssetHub, part_segmentation
+# «balanced») того же меша: 21 часть, ровно наши 5409 граней, сопоставлены по
+# центроидам. По ней хвост — это хвост, а не «рыжее в радиусе», подсумки
+# висят на своей кости жёстко, а голова отделяется по швам, не по высоте.
+GEN_PARTS = os.path.join(GEN_DIR, "parts.json")
+PART = {
+    "jacket": 0, "glove_r": 1, "pants": 2, "head": 3, "hood": 4,
+    "boot_l": 5, "boot_r": 6, "thigh_pouch_l": 7, "glove_l": 8, "tail": 9,
+    "thigh_pouch_r": 10, "belt_pouch_front": 11, "belt_pouch_side": 12,
+    "belt_pouch_back": 13, "chest_tag": 14,
+}
+# Мелочь на морде (глаза, усы): 15–20, по 3–5 граней — идёт с головой.
+HEAD_PARTS = {PART["head"], 15, 16, 17, 18, 19, 20}
+# Жёсткие детали: вся часть — на одной кости, ей нечего гнуть. Сторона у
+# бедренных подсумков — по знаку X центроида, чтобы не путать лево и право.
+RIGID_PARTS = {
+    PART["thigh_pouch_l"]: "UpLeg", PART["thigh_pouch_r"]: "UpLeg",
+    PART["belt_pouch_front"]: RIG + "Hips", PART["belt_pouch_side"]: RIG + "Hips",
+    PART["belt_pouch_back"]: RIG + "Hips", PART["chest_tag"]: RIG + "Spine1",
+}
+
+
+def load_parts(obj):
+    """Часть каждой грани — в атрибут `part`, чтобы пережить нарезку меша."""
+    import json
+
+    labels = json.load(open(GEN_PARTS))["faces"]
+    me = obj.data
+    if len(labels) != len(me.polygons):
+        sys.exit(f"parts.json: {len(labels)} граней, в меше {len(me.polygons)}")
+    attr = me.attributes.new("part", "INT", "FACE")
+    attr.data.foreach_set("value", labels)
+
+
+def part_of_faces(obj):
+    """Список: часть каждой грани."""
+    attr = obj.data.attributes["part"]
+    out = [0] * len(attr.data)
+    attr.data.foreach_get("value", out)
+    return out
+
+
+def vertex_parts(obj):
+    """Множество частей, к граням которых принадлежит каждая вершина."""
+    parts = part_of_faces(obj)
+    out = [set() for _ in obj.data.vertices]
+    for poly, part in zip(obj.data.polygons, parts):
+        for v in poly.vertices:
+            out[v].add(part)
+    return out
 
 
 def import_gen():
@@ -223,16 +270,17 @@ def paint_from_texture(obj, img):
     me.color_attributes.active_color = attr
 
 
-def split_head(obj, z):
+def split_head(obj):
     """Голова и корпус — разные меши: у них разные хозяева (порода vs
-    архетип), и по имени код гасит видимость."""
+    архетип), и по имени код гасит видимость. Граница — по частям
+    сегментации: морда с ушами отдельно, капюшон остаётся на корпусе."""
     bpy.context.view_layer.objects.active = obj
     obj.select_set(True)
     bpy.ops.object.mode_set(mode="EDIT")
     bpy.ops.mesh.select_all(action="DESELECT")
     bpy.ops.object.mode_set(mode="OBJECT")
-    for poly in obj.data.polygons:
-        poly.select = obj.data.vertices[poly.vertices[0]].co.z >= z
+    for poly, part in zip(obj.data.polygons, part_of_faces(obj)):
+        poly.select = part in HEAD_PARTS
     bpy.ops.object.mode_set(mode="EDIT")
     bpy.ops.mesh.separate(type="SELECTED")
     bpy.ops.object.mode_set(mode="OBJECT")
@@ -274,11 +322,12 @@ def textured_material(name, atlas):
 def build_cat(rig):
     """Корпус и голова из сгенерированного меша, с весами от скелета."""
     obj = import_gen()
+    load_parts(obj)
     atlas = load_texture()
     obj.data.materials.clear()
     obj.data.materials.append(textured_material("rusty_skin", atlas))
 
-    body, head = split_head(obj, HEAD_SPLIT_Z)
+    body, head = split_head(obj)
     body.name = body.data.name = "body_stocky"
     head.name = head.data.name = "head_rusty"
 
@@ -293,16 +342,45 @@ def build_cat(rig):
     for obj in (body, head):
         if not obj.vertex_groups:
             sys.exit(f"{obj.name}: автовеса не легли")
-    # Цвет вершин нужен раньше весов: по нему хвост отличается от подсумка.
-    paint_from_texture(body, atlas)
-    paint_from_texture(head, atlas)
     confine_tail(body, rig)
-    pin_belt(body, rig)
+    pin_rigid_parts(body, rig)
     for obj in (body, head):
         fill_orphans(obj, rig)
-    clean_tail_texture(body, atlas)
     paint_from_texture(body, atlas)
+    paint_from_texture(head, atlas)
     return body, head
+
+
+def pin_rigid_parts(obj, rig):
+    """Жёсткие детали — на одной кости целиком.
+
+    Тепловая диффузия делит подсумок между тазом и бедром, и при махе ноги
+    он тянется, а бирка на груди без весов вовсе. Вершины, все грани которых
+    в жёсткой части, получают одну кость с весом 1; вершины на шве с одеждой
+    оставляют веса диффузии — так шов не рвётся.
+    """
+    parts = part_of_faces(obj)
+    per_vertex = vertex_parts(obj)
+    centroid = {}
+    for poly, part in zip(obj.data.polygons, parts):
+        if part in RIGID_PARTS:
+            centroid.setdefault(part, []).append(poly.center.x)
+    for part, bone in RIGID_PARTS.items():
+        if part not in centroid:
+            continue
+        if bone == "UpLeg":
+            side = "Left" if sum(centroid[part]) > 0 else "Right"
+            bone = RIG + side + "UpLeg"
+        group = obj.vertex_groups[bone]
+        moved = 0
+        for v in obj.data.vertices:
+            if per_vertex[v.index] != {part}:
+                continue
+            for g in obj.vertex_groups:
+                g.remove([v.index])
+            group.add([v.index], 1.0, "REPLACE")
+            moved += 1
+        print(f"  часть {part} → {bone.replace(RIG, '')}: {moved} вершин жёстко")
 
 
 def fill_orphans(obj, rig):
@@ -324,123 +402,23 @@ def fill_orphans(obj, rig):
         print(f"  {obj.name}: {len(orphans)} вершин без весов → ближайшая кость")
 
 
-def clean_tail_texture(obj, img, passes=40):
-    """Стереть с хвоста нарисованный на нём подсумок.
-
-    Tripo спроецировал подсумок с концепта на UV-остров хвоста: тёмное пятно
-    у корня, которое машет вместе с хвостом и читается как отлетевшая
-    деталь. Грани хвоста — по весам; их текселы, что темнее меха, заливаются
-    волной от рыжих соседей по тому же острову.
-    """
-    import numpy as np
-
-    me = obj.data
-    idx = {g.index: g.name for g in obj.vertex_groups}
-    tail_w = np.zeros(len(me.vertices), dtype=np.float32)
-    for v in me.vertices:
-        tail_w[v.index] = sum(ge.weight for ge in v.groups if idx[ge.group].startswith("tail_"))
-
-    w, h = img.size
-    px = np.empty(w * h * 4, dtype=np.float32)
-    img.pixels.foreach_get(px)
-    px = px.reshape(h, w, 4)
-    uv = me.uv_layers.active.data
-    mask = np.zeros((h, w), dtype=bool)
-    for poly in me.polygons:
-        if any(tail_w[i] < 0.5 for i in poly.vertices):
-            continue
-        tri = np.array([uv[l].uv[:] for l in poly.loop_indices]) * (w, h)
-        x0, y0 = np.floor(tri.min(axis=0)).astype(int)
-        x1, y1 = np.ceil(tri.max(axis=0)).astype(int)
-        ys, xs = np.mgrid[max(y0, 0):min(y1 + 1, h), max(x0, 0):min(x1 + 1, w)]
-        p = np.stack([xs + 0.5, ys + 0.5], axis=-1)
-        a, b, c = tri
-        det = (b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1])
-        if abs(det) < 1e-9:
-            continue
-        l1 = ((b[0] - p[..., 0]) * (c[1] - p[..., 1]) - (c[0] - p[..., 0]) * (b[1] - p[..., 1])) / det
-        l2 = ((c[0] - p[..., 0]) * (a[1] - p[..., 1]) - (a[0] - p[..., 0]) * (c[1] - p[..., 1])) / det
-        l3 = 1.0 - l1 - l2
-        inside = (l1 >= -0.02) & (l2 >= -0.02) & (l3 >= -0.02)
-        mask[ys[inside], xs[inside]] = True
-
-    rgb = px[:, :, :3]
-    fur = rgb[:, :, 0] > rgb[:, :, 2] * 1.45
-    todo = mask & ~fur
-    good = mask & fur
-    print(f"  хвост: {int(mask.sum())} текселов, перекрашено {int(todo.sum())}")
-    shifts = [(dy, dx) for dy in (-1, 0, 1) for dx in (-1, 0, 1) if (dy, dx) != (0, 0)]
-    for _ in range(passes):
-        if not todo.any():
-            break
-        acc = np.zeros_like(rgb)
-        cnt = np.zeros((h, w), dtype=np.float32)
-        for dy, dx in shifts:
-            sc = np.roll(good, (dy, dx), axis=(0, 1))
-            acc += np.roll(rgb, (dy, dx), axis=(0, 1)) * sc[:, :, None]
-            cnt += sc
-        fill = todo & (cnt > 0)
-        rgb[fill] = acc[fill] / cnt[fill][:, None]
-        good |= fill
-        todo &= ~fill
-    img.pixels.foreach_set(px.ravel())
-    img.pack()
-
-
-def pin_belt(obj, rig):
-    """Ремень и всё, что на нём висит сзади, — на тазу, не на ногах.
-
-    Тепловая диффузия отдаёт подсумки на заду бедру: они ближе к нему, чем
-    к кости таза. Но висят они на ремне, и с ягодицей при махе ноги ехать
-    не должны. Всё выше паха с боков и сзади — бедренные веса переходят
-    тазу; спереди правило не действует, там карманы на самих штанах.
-    Корпус у Tripo узкий: спина в 7 см от оси, а подсумок на ремне сзади —
-    на 2–6 см, поэтому «сзади» здесь — всё, что не строго спереди.
-    """
-    hips = obj.vertex_groups[RIG + "Hips"]
-    legs = [obj.vertex_groups[RIG + side + "UpLeg"] for side in ("Left", "Right")]
-    leg_ids = {g.index for g in legs}
-    for v in obj.data.vertices:
-        if v.co.z < L["crotch"] + 0.03 or v.co.y < -0.03:
-            continue
-        moved = sum(ge.weight for ge in v.groups if ge.group in leg_ids)
-        if moved <= 0.0:
-            continue
-        for g in legs:
-            g.remove([v.index])
-        current = next((ge.weight for ge in v.groups if ge.group == hips.index), 0.0)
-        hips.add([v.index], current + moved, "REPLACE")
-
-
-def confine_tail(obj, rig, radius=0.07):
+def confine_tail(obj, rig):
     """Хвостовые кости тянут только хвост.
 
     Корень хвоста стоит у самой спины, и тепловая диффузия отдаёт ему всё
-    рядом — подсумок на заду улетал вслед за хвостом. Хвост — это то, что
-    в `radius` от его цепочки, позади спины и рыжее: подсумок на ремне
-    выступает назад ровно на глубину корня хвоста, и геометрией их не
-    развести, а цветом — да, он тёмный. Остальным хвостовые веса
-    снимаются, остаток нормируется по другим костям.
+    рядом — подсумок на заду улетал вслед за хвостом. Хвост — часть 9
+    сегментации; у вершин вне её хвостовые веса снимаются, остаток
+    нормируется. Снимать можно только тем, у кого есть другие кости: иначе
+    вершина без весов останется в bind-позе и повиснет в воздухе.
     """
-    from mathutils.geometry import intersect_point_line
-
-    chain = [rig.data.bones[n] for n in ("tail_1", "tail_2", "tail_3")]
-    behind = chain[0].head_local.y - 0.02
     groups = {g.name: g for g in obj.vertex_groups if g.name.startswith("tail_")}
     if not groups:
         return
-    col = obj.data.color_attributes["Col"].data
     tail_ids = {g.index for g in groups.values()}
+    per_vertex = vertex_parts(obj)
     for v in obj.data.vertices:
-        d = min((intersect_point_line(v.co, b.head_local, b.tail_local)[0] - v.co).length for b in chain)
-        c = col[v.index].color
-        fur = c[0] > c[2] * 1.45
-        if d <= radius and v.co.y >= behind and fur:
+        if PART["tail"] in per_vertex[v.index]:
             continue
-        # Снимать хвост можно только тому, у кого есть другие кости: у
-        # передней поверхности хвоста, обращённой к телу, их нет, и без
-        # весов она осталась бы в bind-позе — кусок хвоста, висящий в
-        # воздухе, пока хвост машет.
         total = sum(ge.weight for ge in v.groups if ge.group not in tail_ids)
         if total <= 0.0:
             continue
@@ -448,8 +426,6 @@ def confine_tail(obj, rig, radius=0.07):
             g.remove([v.index])
         for ge in v.groups:
             obj.vertex_groups[ge.group].add([v.index], ge.weight / total, "REPLACE")
-
-
 def build_prop(name, parts, mat):
     verts, faces = [], []
     for pv, pf, _ in parts:

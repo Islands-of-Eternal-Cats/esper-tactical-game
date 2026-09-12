@@ -79,6 +79,8 @@ worker.onmessage = (e: MessageEvent<WorkerMessage>): void => {
         onIntent: (cell) => send({ t: 'setZone', cell, radius: DEFAULT_ZONE_RADIUS }),
         onClearIntent: () => send({ t: 'clearZone' }),
       })
+      // Отладка из консоли браузера: заглянуть в граф сцены. Только в dev.
+      if (import.meta.env.DEV) (window as unknown as { __scene: SceneView }).__scene = scene
     } else {
       scene.setWorld(world)
     }

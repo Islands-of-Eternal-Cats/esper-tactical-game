@@ -327,6 +327,12 @@ export class Cats {
     this.objects.clear()
   }
 
+  /** Экранная позиция кота — для отладочной камеры-преследователя. */
+  positionOf(id: string): THREE.Vector3 | null {
+    const obj = this.objects.get(id)
+    return obj === undefined ? null : obj.figure.root.position
+  }
+
   private build(): Figure {
     return this.kit === null ? new StandInFigure() : new ModelFigure(this.kit.spawn(RUSTY_PARTS))
   }
