@@ -51,6 +51,7 @@ const hud = new Hud(hudRoot, {
   onReset: (seed) => {
     send({ t: 'reset', seed })
   },
+  onDebugClearPiles: () => send({ t: 'debugClearPiles' }),
 })
 hud.setSpeed(speed)
 

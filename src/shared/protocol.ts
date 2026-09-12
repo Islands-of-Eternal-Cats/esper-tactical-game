@@ -31,6 +31,8 @@ export type Command =
   | { t: 'setZone'; cell: Cell; radius: number }
   | { t: 'clearZone' }
   | { t: 'reset'; seed: number }
+  /** Отладка: весь мусор исчезает — посмотреть, что кот делает без работы. */
+  | { t: 'debugClearPiles' }
 
 // ─── воркер → главный поток ──────────────────────────────────────────────
 

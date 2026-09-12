@@ -62,6 +62,10 @@ self.onmessage = (e: MessageEvent<Command>): void => {
       sim.clearZone()
       post({ t: 'snapshot', snap: sim.snapshot() })
       break
+    case 'debugClearPiles':
+      sim.debugClearPiles()
+      post({ t: 'snapshot', snap: sim.snapshot() })
+      break
     case 'reset':
       sim = new Sim(cmd.seed)
       acc = 0

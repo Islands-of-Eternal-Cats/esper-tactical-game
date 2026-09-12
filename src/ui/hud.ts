@@ -10,6 +10,7 @@ import type { Snapshot, Speed } from '../shared/protocol'
 export interface HudHandlers {
   onSpeed: (speed: Speed) => void
   onReset: (seed: number) => void
+  onDebugClearPiles: () => void
 }
 
 /** Пять цифр: такой сид можно продиктовать вслух и записать на бумажке. */
@@ -109,6 +110,18 @@ export class Hud {
       handlers.onReset(this.enteredSeed())
     })
     root.appendChild(seeds)
+
+    // Отладка: строка кнопок, которых в игре не будет.
+    const debug = document.createElement('div')
+    debug.className = 'seeds'
+    const clearPiles = document.createElement('button')
+    clearPiles.textContent = 'убрать все кучи'
+    clearPiles.addEventListener('click', () => {
+      clearPiles.blur()
+      handlers.onDebugClearPiles()
+    })
+    debug.appendChild(clearPiles)
+    root.appendChild(debug)
 
     const hint = document.createElement('div')
     hint.className = 'hint'
