@@ -431,7 +431,7 @@ PROP_TRIS = 800
 PROP_TEXTURE = 512
 
 
-def import_prop(name, filename, length, grip_top=True, align=True, origin="grip"):
+def import_prop(name, filename, length, grip_top=True, align=True, origin="grip", tris=PROP_TRIS):
     """Сгенерированный пропс (Tripo text→3D через AssetHub) под сокет.
 
     `align` — выровнять по главной оси (PCA по вершинам): рукоятью вверх,
@@ -485,13 +485,21 @@ def import_prop(name, filename, length, grip_top=True, align=True, origin="grip"
     shift = max(zs) - 0.06 * length if origin == "grip" else min(zs)
     for v in me.vertices:
         v.co.z -= shift
+    if origin == "bottom":
+        # Ранец ставится спиной к спине: ближняя грань (min Y) — в нуле, а
+        # не центроид, который лямки утягивают наружу. Лямки, свисающие
+        # ближе корпуса бака, в расчёт не идут — берётся 5-й процентиль.
+        ys = sorted(v.co.y for v in me.vertices)
+        front = ys[len(ys) // 20]
+        for v in me.vertices:
+            v.co.y -= front
     for poly in me.polygons:
         poly.use_smooth = True
 
     now = sum(len(p.vertices) - 2 for p in me.polygons)
-    if now > PROP_TRIS:
+    if now > tris:
         d = obj.modifiers.new("dec", "DECIMATE")
-        d.ratio = PROP_TRIS / now
+        d.ratio = tris / now
         bpy.ops.object.modifier_apply(modifier="dec")
 
     for mat in me.materials:
@@ -1020,12 +1028,13 @@ def main():
     # Пылесос: ранец на спине и раструб в правой лапе. Рабочий цикл строится
     # от предмета, поэтому предмет существует как отдельный объект в сокете.
     held = import_prop("held_vacuum", "held_vacuum.glb", length=0.62)
-    gear = import_prop("gear_vacuum", "gear_vacuum.glb", length=0.40, align=False, origin="bottom")
+    # Бак с лямками и клёпкой на 800 треугольниках становится угловатым.
+    gear = import_prop("gear_vacuum", "gear_vacuum.glb", length=0.40, align=False, origin="bottom", tris=1500)
     build_clips(rig)
 
     socket(held, rig, "socket_hand_r", (HAND_R[0], HAND_R[1] - 0.06, HAND_R[2] + 0.02), (0.35, 0, 0))
-    # Дно бака — у ремня, лямки прижаты к спине (задняя поверхность ~0.12).
-    socket(gear, rig, "socket_back", (0, 0.24, L["hips"] - 0.02))
+    # Дно бака — у ремня, ближняя грань — на поверхности спины (~0.11).
+    socket(gear, rig, "socket_back", (0, 0.11, L["hips"] - 0.02))
 
     tris = 0
     for obj in (body, head, held, gear):

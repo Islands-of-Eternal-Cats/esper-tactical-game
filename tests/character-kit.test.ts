@@ -201,7 +201,7 @@ describe('character-kit.glb', () => {
     // Пропсы в лапе и на спине — «геройские», в кадре всегда: под них
     // генерация оправдана, и бюджет выше болваночных 200.
     expect(triangles('held_vacuum')).toBeLessThanOrEqual(900)
-    expect(triangles('gear_vacuum')).toBeLessThanOrEqual(900)
+    expect(triangles('gear_vacuum')).toBeLessThanOrEqual(1600)
     // Атлас JPEG 1024² — основная часть веса.
     expect(bytes / 1024).toBeLessThanOrEqual(1200)
   })
