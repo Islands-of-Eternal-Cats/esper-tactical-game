@@ -9,7 +9,7 @@ import * as THREE from 'three'
 import type { Cell, Snapshot, WorldView } from '../shared/protocol'
 import { IsoCamera } from './camera'
 import { Cats } from './cats'
-import { CatKit } from './model'
+import { CatKit, EnvKit } from './model'
 import { Kit, worldToCell } from './kit'
 import { PALETTE } from './palette'
 
@@ -32,6 +32,7 @@ export class SceneView {
   private contextLost = false
   /** Кит переживает пересборку двора: грузить его на каждый сид незачем. */
   private catKit: CatKit | null = null
+  private envKit: EnvKit | null = null
 
   private pointerId: number | null = null
   private startX = 0
@@ -61,6 +62,7 @@ export class SceneView {
     this.scene.add(fill)
 
     this.kit = new Kit(this.scene, world)
+    if (this.envKit !== null) this.kit.setEnv(this.envKit)
     this.cats = new Cats(this.scene, world)
     if (this.catKit !== null) this.cats.setKit(this.catKit)
     this.view.lookAtCentre(0, 0)
@@ -82,6 +84,13 @@ export class SceneView {
         this.cats.setKit(kit)
       },
       (err: unknown) => console.warn('кит персонажей не загрузился, остаёмся на капсуле', err),
+    )
+    void EnvKit.load().then(
+      (env) => {
+        this.envKit = env
+        this.kit.setEnv(env)
+      },
+      (err: unknown) => console.warn('кит окружения не загрузился, кучи остаются коробками', err),
     )
 
     this.bindPointer(handlers)
@@ -174,6 +183,7 @@ export class SceneView {
     this.kit.dispose()
     this.cats.dispose()
     this.kit = new Kit(this.scene, world)
+    if (this.envKit !== null) this.kit.setEnv(this.envKit)
     this.cats = new Cats(this.scene, world)
     if (this.catKit !== null) this.cats.setKit(this.catKit)
   }

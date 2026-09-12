@@ -84,3 +84,35 @@ export function bone(rig: CatRig, name: string): THREE.Bone {
   if (found === undefined) throw new Error(`в ките нет кости ${name}`)
   return found
 }
+
+const URL_ENV = `${import.meta.env.BASE_URL}models/env-kit.glb`
+
+/** Обломки мусора, из которых рендер собирает кучи. Имена — контракт. */
+export const DEBRIS = ['debris_bag', 'debris_barrel', 'debris_crate'] as const
+
+/**
+ * Кит окружения: геометрия и материалы пропсов двора по именам. Меши не
+ * ставятся в сцену сами — рендер инстансирует их сколько нужно.
+ */
+export class EnvKit {
+  private constructor(private readonly parts: Map<string, THREE.Mesh>) {}
+
+  static async load(): Promise<EnvKit> {
+    const gltf = await new GLTFLoader().loadAsync(URL_ENV)
+    const parts = new Map<string, THREE.Mesh>()
+    gltf.scene.traverse((o) => {
+      if (o instanceof THREE.Mesh) parts.set(o.name, o)
+    })
+    for (const name of DEBRIS) {
+      if (!parts.has(name)) throw new Error(`в ките окружения нет ${name}`)
+    }
+    return new EnvKit(parts)
+  }
+
+  /** Геометрия и материал по имени — общие, инстансы их не копируют. */
+  part(name: string): { geometry: THREE.BufferGeometry; material: THREE.Material } {
+    const mesh = this.parts.get(name)
+    if (mesh === undefined) throw new Error(`в ките окружения нет ${name}`)
+    return { geometry: mesh.geometry, material: mesh.material as THREE.Material }
+  }
+}

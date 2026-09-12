@@ -8,6 +8,7 @@
 import * as THREE from 'three'
 import type { Cell, CatView, PileView, Snapshot, WorldView } from '../shared/protocol'
 import { PALETTE } from './palette'
+import { DEBRIS, type EnvKit } from './model'
 
 /** Обломков на кучу. Куча тает, теряя их по одному. */
 const CHUNKS = 8
@@ -141,7 +142,13 @@ export class Kit {
   private readonly ghostShells: THREE.Mesh[] = []
   private ghostSignature = -1
 
-  private readonly piles: THREE.InstancedMesh
+  /**
+   * Кучи — обломки. Пока кит окружения не приехал, обломки — коробки одним
+   * инстансером; с китом — по инстансеру на вид обломка, вид выбирается
+   * хешем от id кучи и номера обломка, как и всё остальное в раскладке.
+   */
+  private piles: THREE.InstancedMesh[]
+  private lastPiles: readonly PileView[] = []
   private readonly zoneRing: THREE.Mesh
   private readonly zoneDisc: THREE.Mesh
   private readonly m = new THREE.Matrix4()
@@ -246,13 +253,17 @@ export class Kit {
     container.position.set(v.x, 0.52, v.z)
     this.root.add(container)
 
-    this.piles = new THREE.InstancedMesh(
-      new THREE.BoxGeometry(0.3, 0.24, 0.3),
-      new THREE.MeshLambertMaterial({ color: PALETTE.pile }),
-      MAX_PILES * CHUNKS,
-    )
-    this.piles.count = 0
-    this.root.add(this.piles)
+    this.piles = [
+      new THREE.InstancedMesh(
+        new THREE.BoxGeometry(0.3, 0.24, 0.3),
+        new THREE.MeshLambertMaterial({ color: PALETTE.pile }),
+        MAX_PILES * CHUNKS,
+      ),
+    ]
+    for (const mesh of this.piles) {
+      mesh.count = 0
+      this.root.add(mesh)
+    }
 
     // Зона приоритета: намерение игрока, а не маршрут. Тёплый янтарь —
     // красный зарезервирован под угрозу.
@@ -356,8 +367,29 @@ export class Kit {
     })
   }
 
+  /** Кит окружения приехал: кучи пересобираются из настоящих обломков. */
+  setEnv(env: EnvKit): void {
+    for (const mesh of this.piles) {
+      this.root.remove(mesh)
+      // Геометрия коробки — своя, материал кита — общий, его не трогаем.
+      if (this.piles.length === 1) {
+        mesh.geometry.dispose()
+        ;(mesh.material as THREE.Material).dispose()
+      }
+    }
+    this.piles = DEBRIS.map((name) => {
+      const { geometry, material } = env.part(name)
+      const mesh = new THREE.InstancedMesh(geometry, material, MAX_PILES * CHUNKS)
+      mesh.count = 0
+      this.root.add(mesh)
+      return mesh
+    })
+    this.syncPiles(this.lastPiles)
+  }
+
   private syncPiles(piles: readonly PileView[]): void {
-    let n = 0
+    this.lastPiles = piles
+    const counts = this.piles.map(() => 0)
     const centre = new THREE.Vector3()
 
     for (const pile of piles.slice(0, MAX_PILES)) {
@@ -382,14 +414,18 @@ export class Kit {
           0.1 + level * 0.15,
           centre.z + Math.sin(angle) * radius,
         )
-        this.q.setFromAxisAngle(AXIS_Y, hash01(pile.id, i * 11) * Math.PI)
+        this.q.setFromAxisAngle(AXIS_Y, hash01(pile.id, i * 11) * Math.PI * 2)
         this.scl.setScalar(size * tail)
-        this.piles.setMatrixAt(n++, this.m.compose(this.pos, this.q, this.scl))
+        const kind = Math.floor(hash01(pile.id, i * 13 + 5) * this.piles.length) % this.piles.length
+        const mesh = this.piles[kind]!
+        mesh.setMatrixAt(counts[kind]!++, this.m.compose(this.pos, this.q, this.scl))
       }
     }
 
-    this.piles.count = n
-    this.piles.instanceMatrix.needsUpdate = true
+    this.piles.forEach((mesh, k) => {
+      mesh.count = counts[k]!
+      mesh.instanceMatrix.needsUpdate = true
+    })
   }
 
   private syncZone(zone: Snapshot['zone']): void {
@@ -406,6 +442,9 @@ export class Kit {
 
   dispose(): void {
     this.scene.remove(this.root)
+    // Геометрия и материалы обломков — общее добро кита окружения: снять их
+    // из дерева до общей уборки, иначе следующий двор получит пустые кучи.
+    if (this.piles.length > 1) for (const mesh of this.piles) this.root.remove(mesh)
     disposeTree(this.root)
   }
 }

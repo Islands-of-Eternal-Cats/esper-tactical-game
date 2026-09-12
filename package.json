@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build && node scripts/check-budget.mjs",
     "preview": "vite preview",
-    "assets": "/Applications/Blender.app/Contents/MacOS/Blender --background --python assets/build-character-kit.py",
+    "assets": "/Applications/Blender.app/Contents/MacOS/Blender --background --python assets/build-character-kit.py && /Applications/Blender.app/Contents/MacOS/Blender --background --python assets/build-env-kit.py",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint .",
