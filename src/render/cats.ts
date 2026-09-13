@@ -144,6 +144,10 @@ class ModelFigure implements Figure {
   constructor(rig: CatRig) {
     this.root.add(this.body)
     this.body.add(rig.root)
+    // Кот отбрасывает тень: без неё он плывёт над полом, а не стоит на нём.
+    rig.root.traverse((o) => {
+      if (o instanceof THREE.Mesh) o.castShadow = true
+    })
 
     this.gear = rig.root.getObjectByName('gear_vacuum') ?? null
     this.held = rig.root.getObjectByName('held_vacuum') ?? null

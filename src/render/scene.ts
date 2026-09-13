@@ -69,18 +69,42 @@ export class SceneView {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true })
     // Выше двух гнать нечего: плоская заливка от этого не выигрывает.
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+    // Контраст — из тонмаппинга, а не из яркости ламп: плоские заливки без
+    // него сливаются в одно серое пятно, светлое и тёмное не расходятся.
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping
+    this.renderer.toneMappingExposure = 1.15
+    // Тени от ключевого света — то, что ставит предмет на землю. Без них
+    // стена и пол одного тона смыкаются в одну плоскость.
+    this.renderer.shadowMap.enabled = true
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap
     this.scene.background = skyGradient()
     // Туман съедает улицу за оградой в цвет фона: двор — освещённый
     // островок, за ним ничего разглядывать не надо. Дальность от камеры
     // (60) с запасом на весь двор: сам двор туман не трогает.
     this.scene.fog = new THREE.Fog(PALETTE.background, 64, 96)
 
-    // Теней нет: при плоской заливке форма читается затенением по нормали.
-    this.scene.add(new THREE.HemisphereLight(0x9fb4cc, 0x20242c, 1.6))
-    const key = new THREE.DirectionalLight(0xfff0dd, 1.5)
-    key.position.set(6, 12, 4)
+    // Рассеянного света мало и он холодный: тень должна быть тёмной, иначе
+    // она не тень. Ключевой — сильный, чуть тёплый, сверху и с ближней
+    // стороны (камера смотрит от +X+Z): грань +Z освещена, грань +X в
+    // полутени, и тень ложится на пол правее блока, где её видно, а не
+    // за ним, где её загораживает сам блок.
+    this.scene.add(new THREE.HemisphereLight(0x8fa4bf, 0x14171c, 0.55))
+    const key = new THREE.DirectionalLight(0xfff0dd, 2.6)
+    key.position.set(-5, 14, 9)
+    key.castShadow = true
+    // Двор 20×20 плюс ограда; тень ортографическая, без запаса по краям
+    // она обрезается на дальней стене.
+    const sc = key.shadow.camera
+    sc.left = sc.bottom = -20
+    sc.right = sc.top = 20
+    sc.near = 1
+    sc.far = 60
+    key.shadow.mapSize.set(2048, 2048)
+    key.shadow.bias = -0.0005
+    key.shadow.normalBias = 0.02
     this.scene.add(key)
-    const fill = new THREE.DirectionalLight(0x6d86a8, 0.7)
+    this.scene.add(key.target)
+    const fill = new THREE.DirectionalLight(0x6d86a8, 0.35)
     fill.position.set(-8, 6, -6)
     this.scene.add(fill)
 

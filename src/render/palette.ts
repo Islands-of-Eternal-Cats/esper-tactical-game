@@ -14,12 +14,12 @@ export const PALETTE = {
    * с wall, это средний цвет тайла из `assets/gen/textures/` — тайлы
    * тонируются в палитру при генерации, поэтому цвета здесь и там одни.
    */
-  street: 0x293039,
-  floor: 0x2b313a,
+  street: 0x1c2026,
+  floor: 0x22272e,
   floorEdge: 0x1b1f26,
   /** Разметка клеток на полу: чуть светлее пола, чтобы читалась, но не спорила. */
   grid: 0x373e49,
-  wall: 0x3b434f,
+  wall: 0x4a5461,
   wallGhostEdge: 0x93a4ba,
   wallTop: 0x49525f,
   container: 0x35505c,

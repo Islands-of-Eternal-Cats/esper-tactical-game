@@ -201,6 +201,7 @@ export class Kit {
       new THREE.MeshLambertMaterial({ color: PALETTE.floor }),
     )
     slab.position.y = -0.2
+    slab.receiveShadow = true
     this.root.add(slab)
     this.slab = slab
 
@@ -248,6 +249,8 @@ export class Kit {
       new THREE.MeshLambertMaterial({ color: PALETTE.wall }),
       Math.max(1, world.walls.length),
     )
+    this.wallsSolid.castShadow = true
+    this.wallsSolid.receiveShadow = true
     this.root.add(this.wallsSolid)
 
     const ghostMaterial = new THREE.MeshLambertMaterial({
@@ -289,6 +292,7 @@ export class Kit {
     )
     cellToWorld(world.container, world, v)
     container.position.set(v.x, 0, v.z)
+    container.castShadow = true
     this.root.add(container)
     this.container = container
 
@@ -421,6 +425,7 @@ export class Kit {
       const { geometry, material } = env.part(name)
       const mesh = new THREE.InstancedMesh(geometry, material, MAX_PILES * CHUNKS)
       mesh.count = 0
+      mesh.castShadow = true
       this.root.add(mesh)
       return mesh
     })
@@ -440,6 +445,7 @@ export class Kit {
       const { geometry, material } = env.part(name)
       const mesh = new THREE.InstancedMesh(geometry, material, width * height)
       mesh.count = 0
+      mesh.receiveShadow = true
       this.root.add(mesh)
       return mesh
     })
@@ -500,6 +506,7 @@ export class Kit {
     }
     const street = new THREE.Mesh(new THREE.PlaneGeometry(STREET_SIZE, STREET_SIZE), asphalt)
     street.rotation.x = -Math.PI / 2
+    street.receiveShadow = true
     street.position.y = STREET_Y
     this.root.add(street)
 
@@ -530,6 +537,8 @@ export class Kit {
       const mesh = new THREE.InstancedMesh(geometry, material, list.length)
       list.forEach((m, i) => mesh.setMatrixAt(i, m))
       mesh.instanceMatrix.needsUpdate = true
+      mesh.castShadow = true
+      mesh.receiveShadow = true
       this.root.add(mesh)
       this.props.push(mesh)
     }
@@ -641,6 +650,7 @@ export class Kit {
       list.forEach((m, i) => mesh.setMatrixAt(i, m))
       mesh.count = list.length
       mesh.instanceMatrix.needsUpdate = true
+      mesh.castShadow = true
       this.root.add(mesh)
       return mesh
     }))

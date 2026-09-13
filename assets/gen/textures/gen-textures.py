@@ -36,7 +36,8 @@ NEGATIVE = (
 
 TILES = {
     "concrete_floor": dict(
-        colour=0x2B313A,
+        colour=0x22272E,
+        contrast=0.35,
         # Швов и трещин в тайле быть не должно: шов между плитками — фаска
         # модуля, а рисунок в метр повторялся бы по всему двору.
         prompt="top-down close-up photo of uniform weathered concrete surface, fine aggregate "
@@ -44,16 +45,16 @@ TILES = {
         seed=13,
     ),
     "wall_panel": dict(
-        colour=0x3B434F,
+        colour=0x4A5461,
         # Стена стоит вертикально к камере и ближе всего к глазу: крапинка
         # с той же силой, что на полу, читалась гранитом.
-        contrast=0.35,
+        contrast=0.25,
         prompt="close-up photo of uniform stained concrete surface, soft streaks of grime and "
         "water stains, no joints, no cracks, flat overcast lighting, seamless tileable texture",
         seed=41,
     ),
     "asphalt": dict(
-        colour=0x293039,
+        colour=0x1C2026,
         prompt="top-down photo of dark aged asphalt surface, fine grain, faint patches, "
         "flat overcast lighting, uniform, seamless tileable texture",
         seed=37,
