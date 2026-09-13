@@ -105,6 +105,7 @@ export const MODULES = [
   'wall_block',
   'edge_wall',
   'edge_curb',
+  'street_tile',
   'prop_dumpster',
   'prop_lamp_wall',
   'prop_vent',

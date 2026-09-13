@@ -13,8 +13,13 @@
 Модули двора — пол, стены, контейнер, лампы, трубы, вентиляция — строятся
 здесь из примитивов с фасками. Модульное и повторяющееся моделится руками,
 а не генерится: стыки по сетке у генерации у каждого куска свои, а фаска на
-ребре при плоской заливке — единственное, чем читается форма. Текстур нет
-ни одной, все материалы плоские: именно текстуры раздувают веб-сборки.
+ребре при плоской заливке — единственное, чем читается форма.
+
+Материалы плоские, кроме трёх больших поверхностей — бетон пола, панель
+стены, асфальт улицы: у них бесшовный тайл 256² из `gen/textures/`
+(см. `gen-textures.py`), уже тонированный в палитру. Это шум поверхности,
+а не текстура в полном смысле: три картинки на весь двор, ~10 КБ каждая,
+повторяются по UV и на размер двора не влияют. Пропсы текстур не носят.
 
 Модули кладутся на сетку симуляции: клетка — метр, начало координат модуля —
 середина его клетки на уровне пола; у настенных пропсов — точка касания
@@ -105,18 +110,36 @@ COLOURS = {
     "steel_dark": (0.024, 0.030, 0.038, 1.0),
     "dumpster": (0.036, 0.075, 0.100, 1.0),
     "rubber": (0.018, 0.017, 0.016, 1.0),
+    "asphalt": (0.023, 0.028, 0.038, 1.0),
     "lamp_glow": (1.0, 0.62, 0.22, 1.0),
 }
 MATERIALS = {}
+
+# Тайлы поверхностей: ключ материала → файл в gen/textures/. Тайл уже в
+# цвете палитры, поэтому идёт в Base Color как есть; нет файла — плоский цвет.
+TEX_DIR = os.path.join(ROOT, "assets", "gen", "textures")
+TEXTURES = {
+    "concrete": "concrete_floor.png",
+    "wall": "wall_panel.png",
+    "asphalt": "asphalt.png",
+}
 
 
 def material(key):
     if key not in MATERIALS:
         mat = bpy.data.materials.new(key)
         mat.use_nodes = True
-        bsdf = mat.node_tree.nodes["Principled BSDF"]
+        nodes = mat.node_tree.nodes
+        bsdf = nodes["Principled BSDF"]
         colour = COLOURS[key]
         bsdf.inputs["Base Color"].default_value = colour
+        tex_path = os.path.join(TEX_DIR, TEXTURES.get(key, ""))
+        if key in TEXTURES and os.path.exists(tex_path):
+            tex = nodes.new("ShaderNodeTexImage")
+            tex.image = bpy.data.images.load(tex_path)
+            tex.image.name = key + "_tile"
+            tex.image.pack()
+            mat.node_tree.links.new(tex.outputs["Color"], bsdf.inputs["Base Color"])
         bsdf.inputs["Roughness"].default_value = 0.9
         bsdf.inputs["Metallic"].default_value = 0.0
         if key == "lamp_glow":
@@ -217,6 +240,16 @@ def floor_grate():
 WALL_H = 1.3
 
 
+def street_tile():
+    """Метр улицы: плоскость под асфальт. Рендер тянет её до горизонта сам,
+    повторяя тайл; в ките она ради материала."""
+    bpy.ops.mesh.primitive_plane_add(size=1.0)
+    obj = bpy.context.active_object
+    obj.name = obj.data.name = "street_tile"
+    obj.data.materials.append(material("asphalt"))
+    return obj
+
+
 def wall_block():
     """Стенной блок в клетку. Фаска — стык панелей, из клеток растёт блок."""
     return box("wall_block", (1.0, 1.0, WALL_H), bevel=0.04, colour="wall")
@@ -293,7 +326,7 @@ def prop_pipe_joint():
 
 
 MODULES = [
-    floor_slab, floor_patch, floor_grate, wall_block, edge_wall, edge_curb,
+    floor_slab, floor_patch, floor_grate, wall_block, edge_wall, edge_curb, street_tile,
     prop_dumpster, prop_lamp_wall, prop_vent, prop_ac, prop_pipe, prop_pipe_joint,
 ]
 

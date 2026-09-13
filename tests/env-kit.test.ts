@@ -44,12 +44,11 @@ describe('env-kit.glb', () => {
       expect(mesh, `нет ${name}`).toBeDefined()
       expect(mesh?.primitives[0]?.attributes.TEXCOORD_0, `${name} без UV`).toBeDefined()
     }
-    expect(json.images ?? []).toHaveLength(3)
   })
 
   it('несёт модули двора без текстур: плоские материалы, бюджет 50–300 тр.', () => {
     const modules = [
-      'floor_slab', 'floor_patch', 'floor_grate', 'wall_block', 'edge_wall', 'edge_curb',
+      'floor_slab', 'floor_patch', 'floor_grate', 'wall_block', 'edge_wall', 'edge_curb', 'street_tile',
       'prop_dumpster', 'prop_lamp_wall', 'prop_vent', 'prop_ac', 'prop_pipe', 'prop_pipe_joint',
     ]
     for (const name of modules) {
@@ -57,8 +56,9 @@ describe('env-kit.glb', () => {
       expect(mesh, `нет ${name}`).toBeDefined()
       expect(triangles(name), name).toBeLessThanOrEqual(300)
     }
-    // Картинок ровно столько, сколько обломков: модули текстур не носят.
-    expect(json.images ?? []).toHaveLength(3)
+    // Картинки: карты трёх обломков и три тайла поверхностей — бетон,
+    // панель, асфальт. Больше текстур модули не носят.
+    expect(json.images ?? []).toHaveLength(6)
   })
 
   it('укладывается в бюджет: обломков в кадре десятки, плиток — сотни', () => {

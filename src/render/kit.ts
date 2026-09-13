@@ -20,6 +20,8 @@ const WALL_H = 1.3
 const FLOOR_H = 0.05
 /** Улица под плитой: ниже дна юбки. */
 const STREET_Y = -0.56
+/** Улица — до тумана и дальше, метров. */
+const STREET_SIZE = 160
 /** Толщина панели ограды и парапета. */
 const EDGE_T = 0.3
 
@@ -490,10 +492,13 @@ export class Kit {
    */
   private dressEdge(env: EnvKit): void {
     const { width, height } = this.world
-    const street = new THREE.Mesh(
-      new THREE.PlaneGeometry(160, 160),
-      new THREE.MeshLambertMaterial({ color: PALETTE.street }),
-    )
+    // Материал улицы — из кита: тайл асфальта повторяется по метру.
+    const asphalt = env.part('street_tile').material as THREE.MeshStandardMaterial
+    if (asphalt.map !== null) {
+      asphalt.map.wrapS = asphalt.map.wrapT = THREE.RepeatWrapping
+      asphalt.map.repeat.set(STREET_SIZE, STREET_SIZE)
+    }
+    const street = new THREE.Mesh(new THREE.PlaneGeometry(STREET_SIZE, STREET_SIZE), asphalt)
     street.rotation.x = -Math.PI / 2
     street.position.y = STREET_Y
     this.root.add(street)
