@@ -19,7 +19,9 @@ import * as THREE from 'three'
 
 const LIB = /* glsl */ `
 varying vec3 vYard;
+#ifdef YARD_NORMAL
 varying vec3 vYardN;
+#endif
 
 float hash21(vec2 p) {
   p = fract(p * vec2(127.1, 311.7));
@@ -118,28 +120,35 @@ float k = panel * grain * (1.0 - 0.35 * pore) * (1.0 - 0.2 * grime);
 diffuseColor.rgb *= k;
 `
 
+// Нормаль нужна только стенам; варьинг, который фрагмент не читает,
+// драйвер честно называет мусором в консоли.
 const VERTEX = /* glsl */ `
 #include <project_vertex>
 {
   vec4 wp = vec4(transformed, 1.0);
-  vec3 wn = objectNormal;
   #ifdef USE_INSTANCING
   wp = instanceMatrix * wp;
-  wn = mat3(instanceMatrix) * wn;
   #endif
   vYard = (modelMatrix * wp).xyz;
+  #ifdef YARD_NORMAL
+  vec3 wn = objectNormal;
+  #ifdef USE_INSTANCING
+  wn = mat3(instanceMatrix) * wn;
+  #endif
   vYardN = normalize(mat3(modelMatrix) * wn);
+  #endif
 }
 `
 
-function procedural(material: THREE.MeshStandardMaterial, body: string, key: string): void {
+function procedural(material: THREE.MeshStandardMaterial, body: string, key: string, normal = false): void {
   // Картинка, если приехала, больше не нужна: цвет считается на месте.
   material.map = null
   material.onBeforeCompile = (shader) => {
-    shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', `#include <common>\nvarying vec3 vYard;\nvarying vec3 vYardN;`)
+    const defines = normal ? '#define YARD_NORMAL\n' : ''
+    shader.vertexShader = defines + shader.vertexShader
+      .replace('#include <common>', `#include <common>\nvarying vec3 vYard;\n#ifdef YARD_NORMAL\nvarying vec3 vYardN;\n#endif`)
       .replace('#include <project_vertex>', VERTEX)
-    shader.fragmentShader = shader.fragmentShader
+    shader.fragmentShader = defines + shader.fragmentShader
       .replace('#include <common>', `#include <common>\n${LIB}`)
       .replace('#include <map_fragment>', `{\n${body}\n}`)
   }
@@ -157,5 +166,5 @@ export function proceduralAsphalt(material: THREE.MeshStandardMaterial): void {
 }
 
 export function proceduralWall(material: THREE.MeshStandardMaterial): void {
-  procedural(material, WALL, 'yard-wall')
+  procedural(material, WALL, 'yard-wall', true)
 }
