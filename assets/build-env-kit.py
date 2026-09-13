@@ -277,6 +277,45 @@ def edge_wall():
     return join("edge_wall", [panel, cap])
 
 
+def edge_corrugated():
+    """Панель ограды из гофролиста: тонкий лист и рёбра к двору (−Y).
+
+    Чередуется с бетоном: однородная ограда читалась одной серой стеной."""
+    sheet = box("a", (1.0, 0.3, 2.2), bevel=0.02, colour="steel_dark")
+    parts = [sheet]
+    for i in range(8):
+        x = -0.4375 + i * 0.125
+        parts.append(box("b", (0.06, 0.06, 2.1), at=(x, -0.16, 0.05), colour="steel"))
+    parts.append(box("c", (1.0, 0.38, 0.08), at=(0, 0, 2.2), bevel=0.02, colour="steel_dark"))
+    return join("edge_corrugated", parts)
+
+
+def edge_gate():
+    """Ворота в два метра: бетонный портал, две стальные створки, лампа над
+    ними. Свет — точечный источник в рендере, пластина показывает откуда."""
+    frame = box("a", (2.0, 0.3, 2.2), bevel=0.04, colour="wall")
+    cap = box("b", (2.0, 0.38, 0.1), at=(0, 0, 2.2), bevel=0.02, colour="concrete_dark")
+    parts = [frame, cap]
+    for sx in (-1, 1):
+        parts.append(box("c", (0.86, 0.08, 1.9), at=(sx * 0.46, -0.16, 0.0), bevel=0.015, colour="steel_dark"))
+        parts.append(box("d", (0.5, 0.03, 0.12), at=(sx * 0.46, -0.21, 1.45), colour="steel"))
+        parts.append(box("e", (0.04, 0.06, 0.3), at=(sx * 0.1, -0.23, 0.9), colour="steel"))
+    parts.append(box("f", (0.4, 0.22, 0.12), at=(0, -0.2, 2.0), bevel=0.02, colour="steel_dark"))
+    parts.append(box("g", (0.3, 0.14, 0.02), at=(0, -0.22, 1.98), colour="lamp_glow"))
+    return join("edge_gate", parts)
+
+
+def edge_door():
+    """Дверь в метровой панели: стальное полотно в бетоне, козырёк сверху."""
+    panel = box("a", (1.0, 0.3, 2.2), bevel=0.04, colour="wall")
+    cap = box("b", (1.0, 0.38, 0.1), at=(0, 0, 2.2), bevel=0.02, colour="concrete_dark")
+    leaf = box("c", (0.8, 0.08, 1.9), at=(0, -0.16, 0.0), bevel=0.015, colour="steel_dark")
+    slot = box("d", (0.44, 0.03, 0.1), at=(0, -0.21, 1.5), colour="steel")
+    handle = box("e", (0.04, 0.06, 0.26), at=(0.28, -0.23, 0.9), colour="steel")
+    hood = box("f", (0.9, 0.3, 0.05), at=(0, -0.2, 1.95), colour="steel_dark")
+    return join("edge_door", [panel, cap, leaf, slot, handle, hood])
+
+
 def edge_curb():
     """Парапет в метр по ближним сторонам: низкий, чтобы не загораживать."""
     return box("edge_curb", (1.0, 0.3, 0.35), bevel=0.03)
@@ -387,7 +426,7 @@ def prop_pipe_joint():
 
 
 MODULES = [
-    floor_slab, floor_patch, floor_grate, wall_block, edge_wall, edge_curb, street_tile,
+    floor_slab, floor_patch, floor_grate, wall_block, edge_wall, edge_corrugated, edge_gate, edge_door, edge_curb, street_tile,
     prop_dumpster, prop_barrel, prop_crate, prop_cart, prop_pallet, prop_lamp_wall, prop_vent, prop_ac, prop_pipe, prop_pipe_joint,
 ]
 

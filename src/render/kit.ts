@@ -573,9 +573,10 @@ export class Kit {
    * Улица и ограда вокруг плиты.
    *
    * Улица — плоскость под плитой до тумана: двор стоит на земле, а не висит
-   * в пустоте. По дальним сторонам (−X, −Z) — бетонная ограда в рост: камера
-   * смотрит от +X+Z, и там она ничего не загораживает, только замыкает двор.
-   * По ближним — низкий парапет, с разрывом у угла контейнера: туда выезжают.
+   * в пустоте. По дальним сторонам (−X, −Z) — ограда в рост, бетон и
+   * гофролист, с воротами и дверью: камера смотрит от +X+Z, и там она
+   * ничего не загораживает, только замыкает двор. По ближним — низкий
+   * парапет, с разрывом у угла контейнера: туда выезжают.
    */
   private dressEdge(env: EnvKit): void {
     const { width, height } = this.world
@@ -591,13 +592,15 @@ export class Kit {
     street.position.y = STREET_Y
     this.root.add(street)
 
-    const walls: THREE.Matrix4[] = []
-    const curbs: THREE.Matrix4[] = []
-    const put = (into: THREE.Matrix4[], x: number, z: number, yaw: number): void => {
+    const kinds = ['edge_wall', 'edge_corrugated', 'edge_gate', 'edge_door', 'edge_curb'] as const
+    type Kind = (typeof kinds)[number]
+    const matrices = new Map<Kind, THREE.Matrix4[]>()
+    for (const kind of kinds) matrices.set(kind, [])
+    const put = (kind: Kind, x: number, z: number, yaw: number): void => {
       this.pos.set(x, STREET_Y, z)
       this.q.setFromAxisAngle(AXIS_Y, yaw)
       this.scl.setScalar(1)
-      into.push(this.m.compose(this.pos, this.q, this.scl).clone())
+      matrices.get(kind)!.push(this.m.compose(this.pos, this.q, this.scl).clone())
     }
     // Ограда стоит вплотную за юбкой плиты, по её внешнему краю.
     const off = 0.3 + EDGE_T / 2
@@ -605,18 +608,47 @@ export class Kit {
     const xR = width / 2 + off
     const zN = -height / 2 - off
     const zF = height / 2 + off
-    // Панели от угла до угла, угловая — с дальней стороны, чтобы стык закрыть.
-    for (let i = -1; i <= width; i++) put(walls, -width / 2 + 0.5 + i, zN, 0)
-    for (let i = 0; i < height; i++) put(walls, xL, -height / 2 + 0.5 + i, Math.PI / 2)
-    // Парапет по ближним сторонам, разрыв в две клетки у угла контейнера.
-    for (let i = 0; i < width - 2; i++) put(curbs, -width / 2 + 0.5 + i, zF, 0)
-    for (let i = 0; i < height - 2; i++) put(curbs, xR, -height / 2 + 0.5 + i, Math.PI / 2)
-    put(curbs, xR, zF, 0)
 
-    for (const [name, list] of [['edge_wall', walls], ['edge_curb', curbs]] as const) {
-      const { geometry, material } = env.part(name)
-      const mesh = new THREE.InstancedMesh(geometry, material, list.length)
+    // Ограда — не одна стена, а панели разных хозяев: бетон и гофролист
+    // участками по 2–4 панели, от хеша участка. Ворота на дальней стене
+    // (две панели), дверь на левой; лампа над воротами — третье тёплое
+    // пятно двора, у входа ему и место.
+    const GATE_AT = 8
+    const DOOR_AT = 14
+    const run = (side: string, i: number): Kind => {
+      const seg = Math.floor(i / 3)
+      return hash01(`${side}${seg}`, 1) < 0.45 ? 'edge_corrugated' : 'edge_wall'
+    }
+    // Панели от угла до угла, угловая — с дальней стороны, чтобы стык закрыть.
+    for (let i = -1; i <= width; i++) {
+      const x = -width / 2 + 0.5 + i
+      if (i === GATE_AT) {
+        put('edge_gate', x + 0.5, zN, 0)
+        continue
+      }
+      if (i === GATE_AT + 1) continue
+      put(run('n', i), x, zN, 0)
+    }
+    for (let i = 0; i < height; i++) {
+      const z = -height / 2 + 0.5 + i
+      put(i === DOOR_AT ? 'edge_door' : run('w', i), xL, z, Math.PI / 2)
+    }
+    // Парапет по ближним сторонам, разрыв в две клетки у угла контейнера.
+    for (let i = 0; i < width - 2; i++) put('edge_curb', -width / 2 + 0.5 + i, zF, 0)
+    for (let i = 0; i < height - 2; i++) put('edge_curb', xR, -height / 2 + 0.5 + i, Math.PI / 2)
+    put('edge_curb', xR, zF, 0)
+
+    const gateLight = new THREE.PointLight(PALETTE.lamp, 7, 8, 2)
+    gateLight.position.set(-width / 2 + 0.5 + GATE_AT + 0.5, STREET_Y + 1.95, zN + 0.35)
+    this.lamps.push(gateLight)
+    this.root.add(gateLight)
+
+    for (const kind of kinds) {
+      const list = matrices.get(kind)!
+      const { geometry, material } = env.part(kind)
+      const mesh = new THREE.InstancedMesh(geometry, material, Math.max(1, list.length))
       list.forEach((m, i) => mesh.setMatrixAt(i, m))
+      mesh.count = list.length
       mesh.instanceMatrix.needsUpdate = true
       mesh.castShadow = true
       mesh.receiveShadow = true
