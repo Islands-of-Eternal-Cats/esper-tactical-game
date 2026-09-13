@@ -13,11 +13,10 @@ import * as THREE from 'three'
 
 const RINGS = 14
 const SIDES = 6
-const RADIUS = 0.022
+const RADIUS = 0.03
 
-/** Насколько провисает середина и насколько выносится вбок, через плечо. */
-const SAG = 0.16
-const SIDE = 0.12
+/** Провис второй управляющей точки — между плечом и рукоятью. */
+const SAG = 0.14
 const SPRING_RATE = 10
 
 export class Hose {
@@ -61,18 +60,16 @@ export class Hose {
   }
 
   /**
-   * Перестроить трубу от `from` к `to` (в системе координат меша). `side` —
-   * направление выноса середины (через плечо), в тех же координатах.
+   * Перестроить трубу от `from` через `over` (точка над плечом — шланг
+   * идёт по нему, а не сквозь корпус) к `to`, всё в системе координат меша.
    */
-  update(from: THREE.Vector3, to: THREE.Vector3, side: THREE.Vector3, dt: number): void {
+  update(from: THREE.Vector3, over: THREE.Vector3, to: THREE.Vector3, dt: number): void {
     const pts = this.curve.points
     pts[0]!.copy(from)
     pts[3]!.copy(to)
     for (let i = 0; i < 2; i++) {
-      const f = i === 0 ? 0.35 : 0.7
-      this.target.lerpVectors(from, to, f)
-      this.target.y -= SAG * (i === 0 ? 1 : 0.7)
-      this.target.addScaledVector(side, SIDE * (i === 0 ? 1 : 0.5))
+      if (i === 0) this.target.copy(over)
+      else this.target.lerpVectors(over, to, 0.55).setY(Math.min(over.y, to.y) - SAG)
       const ctrl = this.ctrl[i]!
       if (!this.primed) ctrl.copy(this.target)
       else ctrl.lerp(this.target, 1 - Math.exp(-SPRING_RATE * dt))

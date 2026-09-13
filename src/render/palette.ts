@@ -20,5 +20,5 @@ export const PALETTE = {
   rustyHead: 0xd98b4f,
   zone: 0xe0a54a,
   /** Резина шланга: чуть теплее и темнее снаряжения. */
-  hose: 0x3d3733,
+  hose: 0x4a423c,
 } as const

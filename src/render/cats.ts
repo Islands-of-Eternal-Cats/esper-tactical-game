@@ -139,7 +139,8 @@ class ModelFigure implements Figure {
   private readonly held: THREE.Object3D | null
   private readonly hoseFrom = new THREE.Vector3()
   private readonly hoseTo = new THREE.Vector3()
-  private readonly hoseSide = new THREE.Vector3()
+  private readonly hoseOver = new THREE.Vector3()
+  private readonly shoulder: THREE.Bone | null
 
   constructor(rig: CatRig) {
     this.root.add(this.body)
@@ -150,8 +151,10 @@ class ModelFigure implements Figure {
     if (this.gear !== null && this.held !== null) {
       this.hose = new Hose(new THREE.MeshLambertMaterial({ color: PALETTE.hose }))
       this.body.add(this.hose.mesh)
+      this.shoulder = bone(rig, 'mixamorig:RightArm')
     } else {
       this.hose = null
+      this.shoulder = null
     }
 
     this.mixer = new THREE.AnimationMixer(rig.root)
@@ -234,16 +237,19 @@ class ModelFigure implements Figure {
    * позиции кота в мире.
    */
   private syncHose(dt: number): void {
-    if (this.hose === null || this.gear === null || this.held === null) return
+    if (this.hose === null || this.gear === null || this.held === null || this.shoulder === null) return
     this.body.updateWorldMatrix(true, true)
     this.gear.localToWorld(this.hoseFrom.set(0, 0.36, -0.02))
     this.held.localToWorld(this.hoseTo.set(0, 0.03, 0))
+    // Через правое плечо: точка снаружи и чуть выше плечевого сустава, и
+    // шланг ложится на плечо, а не режет корпус по диагонали.
+    this.shoulder.getWorldPosition(this.hoseOver)
     this.body.worldToLocal(this.hoseFrom)
     this.body.worldToLocal(this.hoseTo)
-    // Вынос через правое плечо (кот держит раструб правой): в системе
-    // `body` право — это −X.
-    this.hoseSide.set(-1, 0, 0)
-    this.hose.update(this.hoseFrom, this.hoseTo, this.hoseSide, dt)
+    this.body.worldToLocal(this.hoseOver)
+    this.hoseOver.x -= 0.09
+    this.hoseOver.y += 0.07
+    this.hose.update(this.hoseFrom, this.hoseOver, this.hoseTo, dt)
   }
 }
 
