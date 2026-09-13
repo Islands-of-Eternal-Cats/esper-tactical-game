@@ -23,6 +23,16 @@
       }
       #stage { display: block; width: 100vw; height: 100vh; cursor: crosshair; }
       /* Виньетка: края темнеют, взгляд собирается к двору. Нуар без неё — просто тёмная комната. */
+      /* Занавес до загрузки китов: тёмный, с именем — не «грузится», а заставка. */
+      #veil {
+        position: fixed; inset: 0; z-index: 2;
+        display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+        background: #0f1215;
+        transition: opacity .6s ease;
+      }
+      #veil.gone { opacity: 0; pointer-events: none; }
+      #veil .brand { font-size: 13px; letter-spacing: .3em; text-transform: uppercase; color: var(--accent); }
+      #veil .slice { font-size: 12px; letter-spacing: .12em; color: var(--dim); }
       #vignette {
         position: fixed; inset: 0; pointer-events: none;
         background: radial-gradient(ellipse 72% 68% at 50% 46%, transparent 55%, rgba(6, 8, 11, .62) 100%);
@@ -80,6 +90,7 @@
   <body>
     <canvas id="stage"></canvas>
     <div id="vignette"></div>
+    <div id="veil"><div class="brand">Nine Lives Corp</div><div class="slice">срез «Ржавый»</div></div>
     <div id="hud"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>

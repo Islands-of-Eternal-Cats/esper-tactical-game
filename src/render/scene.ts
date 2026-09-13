@@ -59,6 +59,8 @@ export class SceneView {
   private lastX = 0
   private lastY = 0
   private dragging = false
+  /** Киты приехали или отказали — в любом случае показывать можно. */
+  readonly ready: Promise<void>
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -123,22 +125,25 @@ export class SceneView {
       this.contextLost = false
     })
 
-    // Кит грузится в фоне: до него сцена уже работает на капсуле, а падение
-    // загрузки не должно уносить с собой всю игру.
-    void CatKit.load().then(
-      (kit) => {
-        this.catKit = kit
-        this.cats.setKit(kit)
-      },
-      (err: unknown) => console.warn('кит персонажей не загрузился, остаёмся на капсуле', err),
-    )
-    void EnvKit.load().then(
-      (env) => {
-        this.envKit = env
-        this.kit.setEnv(env)
-      },
-      (err: unknown) => console.warn('кит окружения не загрузился, кучи остаются коробками', err),
-    )
+    // Киты грузятся в фоне: сцена уже работает на грейбоксе, и падение
+    // загрузки не уносит с собой игру. Но показывать грейбокс не надо — до
+    // `ready` главный поток держит занавес; капсула остаётся запасным путём.
+    this.ready = Promise.allSettled([
+      CatKit.load().then(
+        (kit) => {
+          this.catKit = kit
+          this.cats.setKit(kit)
+        },
+        (err: unknown) => console.warn('кит персонажей не загрузился, остаёмся на капсуле', err),
+      ),
+      EnvKit.load().then(
+        (env) => {
+          this.envKit = env
+          this.kit.setEnv(env)
+        },
+        (err: unknown) => console.warn('кит окружения не загрузился, кучи остаются коробками', err),
+      ),
+    ]).then(() => undefined)
 
     this.bindPointer(handlers)
     this.resize()

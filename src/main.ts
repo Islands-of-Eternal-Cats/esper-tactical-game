@@ -13,6 +13,7 @@ const UI_HZ = 12
 
 const canvas = document.querySelector<HTMLCanvasElement>('#stage')!
 const hudRoot = document.querySelector<HTMLElement>('#hud')!
+const veil = document.querySelector<HTMLElement>('#veil')!
 
 /** Сид из адреса страницы: ссылка на двор, который стоит показать другому. */
 function seedFromLocation(): number | null {
@@ -82,6 +83,15 @@ worker.onmessage = (e: MessageEvent<WorkerMessage>): void => {
       })
       // Отладка из консоли браузера: заглянуть в граф сцены. Только в dev.
       if (import.meta.env.DEV) (window as unknown as { __scene: SceneView }).__scene = scene
+      // Занавес до китов: иначе первые секунды по двору бегает капсула.
+      // Симуляция стоит, чтобы игрок увидел двор с самого начала, а не с
+      // середины первой ходки; первый кадр под занавесом уже отрисован,
+      // поэтому занавес уходит без чёрной вспышки.
+      send({ t: 'setSpeed', speed: 0 })
+      void scene.ready.then(() => {
+        veil.classList.add('gone')
+        send({ t: 'setSpeed', speed })
+      })
     } else {
       scene.setWorld(world)
     }
