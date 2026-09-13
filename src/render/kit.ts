@@ -34,6 +34,21 @@ const OCCLUDERS: ReadonlyArray<readonly [number, number]> = [
 ]
 
 const AXIS_Y = new THREE.Vector3(0, 1, 0)
+const AXIS_Z = new THREE.Vector3(0, 0, 1)
+
+/** Ламп во дворе: тёплых пятен должно быть мало, иначе нуар кончается. */
+const LAMPS = 2
+/** Высота кронштейна лампы на стене: под самым верхом панели. */
+const LAMP_H = 1.15
+
+/**
+ * Поворот модуля, чтобы его «вперёд» (−Z, как у кота) смотрело вдоль нормали
+ * стены. Настенные пропсы ставятся на грани, обращённые к камере (+X и +Z):
+ * на остальных их не видно.
+ */
+function yawFacing(dx: number, dz: number): number {
+  return Math.atan2(-dx, -dz)
+}
 
 export function cellToWorld(cell: Cell, world: WorldView, out = new THREE.Vector3()): THREE.Vector3 {
   return out.set(cell.x - world.width / 2 + 0.5, 0, cell.y - world.height / 2 + 0.5)
@@ -146,6 +161,10 @@ export class Kit {
   private readonly container: THREE.Mesh
   /** Плитки пола по варианту — только с китом. */
   private floors: THREE.InstancedMesh[] = []
+  /** Пропсы двора по модулю — только с китом. */
+  private props: THREE.InstancedMesh[] = []
+  private readonly lamps: THREE.PointLight[] = []
+  private readonly blocks: Cell[][]
   /** Оболочка на блок: показывается вместо его кубов, когда блок гаснет. */
   private readonly ghostShells: THREE.Mesh[] = []
   private ghostSignature = -1
@@ -216,6 +235,7 @@ export class Kit {
     })
 
     const blocks = this.groupWallsIntoBlocks(world)
+    this.blocks = blocks
 
     this.wallsSolid = new THREE.InstancedMesh(
       wallGeo,
@@ -450,6 +470,119 @@ export class Kit {
     ;(this.container.material as THREE.Material).dispose()
     this.container.geometry = dumpster.geometry
     this.container.material = dumpster.material
+
+    this.dressBlocks(env)
+  }
+
+  /**
+   * Пропсы на блоках стен: вентиляция и кондиционеры на крышах, труба вдоль
+   * длинной стороны с водостоком по стене, лампы на гранях к камере.
+   *
+   * Всё от хеша номера блока — двор одинаков от сида к сиду, как и сами
+   * стены: они существуют, чтобы читаться, а не чтобы удивлять. Пропсы
+   * живут только в рендере: на крышах и на стенах кот не ходит, а на пол
+   * ничего не ставится, чтобы не спорить с кучами и симуляцией.
+   */
+  private dressBlocks(env: EnvKit): void {
+    const kinds = ['prop_vent', 'prop_ac', 'prop_pipe', 'prop_pipe_joint', 'prop_lamp_wall'] as const
+    type Kind = (typeof kinds)[number]
+    const matrices = new Map<Kind, THREE.Matrix4[]>()
+    for (const kind of kinds) matrices.set(kind, [])
+    const put = (kind: Kind, x: number, y: number, z: number, yaw = 0, scale = 1): void => {
+      this.pos.set(x, y, z)
+      this.q.setFromAxisAngle(AXIS_Y, yaw)
+      this.scl.setScalar(scale)
+      matrices.get(kind)!.push(this.m.compose(this.pos, this.q, this.scl).clone())
+    }
+    /** Труба длиной `length` из точки вдоль +X, повёрнутая кватернионом. */
+    const pipe = (x: number, y: number, z: number, length: number): void => {
+      this.pos.set(x, y, z)
+      this.scl.set(length, 1, 1)
+      matrices.get('prop_pipe')!.push(this.m.compose(this.pos, this.q, this.scl).clone())
+    }
+
+    // Лампы достаются блокам с наибольшим хешем: двум, не всем.
+    const lampOrder = this.blocks
+      .map((_, b) => b)
+      .sort((a, b) => hash01('lamp', b) - hash01('lamp', a))
+      .slice(0, LAMPS)
+
+    const min = new THREE.Vector3()
+    const max = new THREE.Vector3()
+    this.blocks.forEach((cells, b) => {
+      const id = `block${b}`
+      cellToWorld(cells[0]!, this.world, min)
+      max.copy(min)
+      for (const cell of cells) {
+        cellToWorld(cell, this.world, this.pos)
+        min.min(this.pos)
+        max.max(this.pos)
+      }
+      // Блоки — прямоугольники клеток; «вдоль» — по длинной стороне.
+      // Точка на доле t длины и на поперечном сдвиге s от оси блока.
+      const alongX = max.x - min.x >= max.z - min.z
+      const length = (alongX ? max.x - min.x : max.z - min.z) + 1
+      const at = (t: number, s: number): [number, number] => {
+        const u = (alongX ? min.x : min.z) - 0.5 + t * length
+        const v = (alongX ? min.z + max.z : min.x + max.x) / 2 + s
+        return alongX ? [u, v] : [v, u]
+      }
+      const roof = WALL_H
+
+      // Вентиляция: одна-две трубы, ближе к краям крыши.
+      const vents = 1 + Math.floor(hash01(id, 1) * 2)
+      for (let i = 0; i < vents; i++) {
+        const [x, z] = at((i === 0 ? 0.25 : 0.75) + (hash01(id, 2 + i) - 0.5) * 0.2, (hash01(id, 5 + i) - 0.5) * 0.4)
+        put('prop_vent', x, roof, z, 0, 0.9 + hash01(id, 9 + i) * 0.3)
+      }
+
+      // Кондиционер — на блоках подлиннее, решёткой к камере.
+      if (length >= 4) {
+        const [x, z] = at(0.5 + (hash01(id, 20) - 0.5) * 0.3, -0.15)
+        put('prop_ac', x, roof, z, alongX ? 0 : -Math.PI / 2)
+      }
+
+      // Труба вдоль края крыши на грани к камере, с коленами и водостоком
+      // вниз по стене на дальнем конце.
+      if (length >= 3) {
+        const inset = 0.12
+        const y = roof + 0.09
+        const [x0, z0] = at(inset / length, 0)
+        const [x1, z1] = at(1 - inset / length, 0)
+        const side = (alongX ? max.z : max.x) + 0.5 - inset
+        const [ax, az] = alongX ? [x0, side] : [side, z0]
+        const [bx, bz] = alongX ? [x1, side] : [side, z1]
+        this.q.setFromAxisAngle(AXIS_Y, alongX ? 0 : -Math.PI / 2)
+        pipe(ax, y, az, length - 2 * inset)
+        put('prop_pipe_joint', ax, y, az)
+        put('prop_pipe_joint', bx, y, bz)
+        this.q.setFromAxisAngle(AXIS_Z, -Math.PI / 2)
+        pipe(bx, y, bz, y)
+      }
+
+      // Лампа на грани к камере: +Z у блока вдоль X, +X у блока вдоль Z.
+      if (lampOrder.includes(b)) {
+        const [x, z] = at(0.35 + hash01(id, 40) * 0.3, 0.5)
+        const [dx, dz] = alongX ? [0, 1] : [1, 0]
+        put('prop_lamp_wall', x, LAMP_H, z, yawFacing(dx, dz))
+        // Свет — из-под плафона, на длину вылета кронштейна.
+        const light = new THREE.PointLight(PALETTE.lamp, 9, 8, 2)
+        light.position.set(x + dx * 0.42, LAMP_H - 0.15, z + dz * 0.42)
+        this.lamps.push(light)
+        this.root.add(light)
+      }
+    })
+
+    this.props = kinds.map((kind) => {
+      const list = matrices.get(kind)!
+      const { geometry, material } = env.part(kind)
+      const mesh = new THREE.InstancedMesh(geometry, material, Math.max(1, list.length))
+      list.forEach((m, i) => mesh.setMatrixAt(i, m))
+      mesh.count = list.length
+      mesh.instanceMatrix.needsUpdate = true
+      this.root.add(mesh)
+      return mesh
+    })
   }
 
   private syncPiles(piles: readonly PileView[]): void {
@@ -514,7 +647,7 @@ export class Kit {
     // Геометрия и материалы кита окружения — общее добро: снять их из
     // дерева до общей уборки, иначе следующий двор получит пустые кучи.
     if (this.piles.length > 1) for (const mesh of this.piles) this.root.remove(mesh)
-    for (const mesh of this.floors) this.root.remove(mesh)
+    for (const mesh of [...this.floors, ...this.props]) this.root.remove(mesh)
     if (this.floors.length > 0) {
       this.root.remove(this.wallsSolid)
       this.root.remove(this.container)

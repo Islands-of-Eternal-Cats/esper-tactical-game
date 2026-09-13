@@ -19,6 +19,8 @@ export const PALETTE = {
   rusty: 0xc2703a,
   rustyHead: 0xd98b4f,
   zone: 0xe0a54a,
+  /** Лампы двора: тёплый янтарь, единственное тепло в холодном дворе. */
+  lamp: 0xffb45a,
   /** Резина шланга: чуть теплее и темнее снаряжения. */
   hose: 0x4a423c,
 } as const
