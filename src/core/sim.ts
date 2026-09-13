@@ -401,9 +401,30 @@ export class Sim {
     }
   }
 
+  /**
+   * Путь к клетке или, если она занята, к ближайшей свободной рядом с ней.
+   *
+   * Контейнер — препятствие: кот разгружается, стоя перед ним, а не
+   * внутри него. Зона на стене или на контейнере — тоже намерение, и кот
+   * идёт к ней настолько, насколько можно, а не отказывается от неё.
+   */
+  private pathToNear(from: Cell, to: Cell): Cell[] | null {
+    const grid = this.state.grid
+    if (!grid.isBlocked(to.x, to.y)) return grid.findPath(from, to)
+    let best: Cell[] | null = null
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dy === 0) continue
+        const path = grid.findPath(from, { x: to.x + dx, y: to.y + dy })
+        if (path !== null && (best === null || path.length < best.length)) best = path
+      }
+    }
+    return best
+  }
+
   private beginHaul(cat: Cat, status: string): void {
     release(this.state, cat)
-    const path = this.state.grid.findPath(this.origin(cat), this.state.container)
+    const path = this.pathToNear(this.origin(cat), this.state.container)
     if (path === null) {
       cat.mode = 'idle'
       cat.status = STATUS.stuck
@@ -422,7 +443,7 @@ export class Sim {
       cat.mode = 'idle'
       return
     }
-    const path = this.state.grid.findPath(this.origin(cat), zone.cell)
+    const path = this.pathToNear(this.origin(cat), zone.cell)
     if (path === null) {
       // До центра зоны не дойти — приоритет молча снимается, иначе кот
       // застрянет в намерении, которое нельзя исполнить.

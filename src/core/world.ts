@@ -61,6 +61,8 @@ export function buildGrid(): { grid: Grid; walls: Cell[]; props: PropView[] } {
   }
   const props = PROPS.map((p) => ({ ...p, cell: { ...p.cell } }))
   for (const p of props) grid.setBlocked(p.cell.x, p.cell.y, true)
+  // Контейнер — тоже препятствие: в него не заходят, к нему подходят.
+  grid.setBlocked(CONTAINER.x, CONTAINER.y, true)
   return { grid, walls, props }
 }
 
