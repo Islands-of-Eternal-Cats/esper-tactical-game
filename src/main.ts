@@ -16,6 +16,7 @@ const canvas = document.querySelector<HTMLCanvasElement>('#stage')!
 const hudRoot = document.querySelector<HTMLElement>('#hud')!
 const veil = document.querySelector<HTMLElement>('#veil')!
 const veilBar = veil.querySelector<HTMLElement>('.bar > i')!
+const veilStage = veil.querySelector<HTMLElement>('.stage')!
 
 /** Сид из адреса страницы: ссылка на двор, который стоит показать другому. */
 function seedFromLocation(): number | null {
@@ -35,10 +36,14 @@ function rememberSeed(seed: number): void {
 }
 
 // Киты запрашиваются первыми: это самое тяжёлое, и ждать сцены незачем.
-// До первого байта полоска пульсирует, с первым — показывает долю.
+//
+// Занавес показывает этапы, а не общий процент: байты честно считаются
+// только у моделей. «код» — до этой строки (полоска пульсирует, это CSS),
+// «модели» — доля по байтам, «сцена» — первый кадр с компиляцией шейдеров.
 const kits = loadKits((fraction) => {
   veil.classList.add('loading')
   veilBar.style.width = `${Math.round(fraction * 100)}%`
+  veilStage.textContent = `модели · ${Math.round(fraction * 100)} %`
 })
 
 const worker = new Worker(new URL('./worker/sim.worker.ts', import.meta.url), { type: 'module' })
@@ -100,8 +105,14 @@ worker.onmessage = (e: MessageEvent<WorkerMessage>): void => {
       void scene.ready.then(() => {
         veil.classList.add('loading')
         veilBar.style.width = '100%'
-        veil.classList.add('gone')
-        send({ t: 'setSpeed', speed })
+        veilStage.textContent = 'сцена'
+        // Первый кадр с китами компилирует шейдеры — это секунда на слабом
+        // GPU, и полоска на 100 % при чёрном экране выглядела бы враньём.
+        // Два кадра: первый рисует и компилирует, второй уже показан.
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          veil.classList.add('gone')
+          send({ t: 'setSpeed', speed })
+        }))
       })
     } else {
       scene.setWorld(world)
