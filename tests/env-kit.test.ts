@@ -48,7 +48,7 @@ describe('env-kit.glb', () => {
 
   it('несёт модули двора без текстур: плоские материалы, бюджет 50–300 тр.', () => {
     const modules = [
-      'floor_slab', 'floor_patch', 'floor_grate', 'wall_block', 'wall_block_b', 'wall_block_c', 'wall_block_grille', 'wall_block_plate', 'edge_wall', 'edge_corrugated', 'edge_gate', 'edge_door', 'edge_curb', 'street_tile',
+      'floor_slab', 'floor_patch', 'floor_grate', 'wall_block', 'wall_block_grille', 'wall_block_plate', 'edge_wall', 'edge_corrugated', 'edge_gate', 'edge_door', 'edge_curb', 'street_tile',
       'prop_dumpster', 'prop_barrel', 'prop_crate', 'prop_cart', 'prop_pallet', 'prop_lamp_wall', 'prop_vent', 'prop_ac', 'prop_pipe', 'prop_pipe_joint',
     ]
     for (const name of modules) {
@@ -56,9 +56,9 @@ describe('env-kit.glb', () => {
       expect(mesh, `нет ${name}`).toBeDefined()
       expect(triangles(name), name).toBeLessThanOrEqual(300)
     }
-    // Картинки: карты трёх обломков и тайл панели стены. Бетон и асфальт —
-    // шейдером в рендере, больше текстур модули не носят.
-    expect(json.images ?? []).toHaveLength(4)
+    // Картинки: только карты трёх обломков. Поверхности двора — шейдером
+    // в рендере, модули текстур не носят.
+    expect(json.images ?? []).toHaveLength(3)
   })
 
   it('укладывается в бюджет: обломков в кадре десятки, плиток — сотни', () => {

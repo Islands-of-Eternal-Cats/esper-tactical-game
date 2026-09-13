@@ -557,8 +557,8 @@ export class Kit {
 
     this.dressEdge(env)
 
-    // Стены — панели пяти вариантов: три с тем же тайлом в разных
-    // положениях и две с деталью. Одна панель на всех читалась обоями.
+    // Стены — панели трёх вариантов: гладкая и две с деталью; тон и
+    // рисунок каждой панели даёт шейдер по координате.
     for (const mesh of this.wallsSolid) {
       this.root.remove(mesh)
       mesh.geometry.dispose()
@@ -575,7 +575,7 @@ export class Kit {
     this.wallKindOf = this.world.walls.map((cell) => {
       const r = hash01(`wall${cell.x}:${cell.y}`, 3)
       // Деталей мало: решётка и пластина — по одной на блок-другой.
-      return r < 0.06 ? 3 : r < 0.12 ? 4 : Math.floor(r * 40) % 3
+      return r < 0.06 ? 1 : r < 0.12 ? 2 : 0
     })
     this.ghostSignature = -1
 

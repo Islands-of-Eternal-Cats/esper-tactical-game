@@ -15,7 +15,7 @@ import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
-import { proceduralAsphalt, proceduralConcrete } from './surface'
+import { proceduralAsphalt, proceduralConcrete, proceduralWall } from './surface'
 
 const URL_KIT = `${import.meta.env.BASE_URL}models/character-kit.glb`
 
@@ -100,8 +100,8 @@ export const DEBRIS = ['debris_bag', 'debris_barrel', 'debris_crate'] as const
 /** Плитки пола: по клетке на каждую, вариант выбирается хешем клетки. */
 export const FLOORS = ['floor_slab', 'floor_patch', 'floor_grate'] as const
 
-/** Панели стен: три положения одного тайла и две с деталью. По хешу клетки. */
-export const WALL_BLOCKS = ['wall_block', 'wall_block_b', 'wall_block_c', 'wall_block_grille', 'wall_block_plate'] as const
+/** Панели стен: гладкая и две с деталью. По хешу клетки; тон — шейдером. */
+export const WALL_BLOCKS = ['wall_block', 'wall_block_grille', 'wall_block_plate'] as const
 
 /** Модули двора, которые рендер ставит по раскладке. Имена — контракт. */
 export const MODULES = [
@@ -152,7 +152,7 @@ export class EnvKit {
       list.push(o)
       meshes.set(base, list)
     })
-    // Бетон и асфальт — шейдером по мировой координате, не картинкой.
+    // Бетон, асфальт и стены — шейдером по мировой координате, не картинкой.
     // Материалы в ките общие, править каждый достаточно один раз.
     const patched = new Set<THREE.Material>()
     for (const list of meshes.values()) {
@@ -162,6 +162,7 @@ export class EnvKit {
         patched.add(mat)
         if (mat.name === 'concrete') proceduralConcrete(mat)
         else if (mat.name === 'asphalt') proceduralAsphalt(mat)
+        else if (mat.name === 'wall') proceduralWall(mat)
       }
     }
     const parts = new Map<string, EnvPart>()

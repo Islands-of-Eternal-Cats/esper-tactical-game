@@ -1,5 +1,5 @@
 /**
- * Бетон и асфальт — шейдером, по мировой координате.
+ * Бетон, асфальт и стены — шейдером, по мировой координате.
  *
  * Тайл на плитке повторялся клетка в клетку, и глаз это ловил. Здесь цвет
  * считается из `(x, z)` точки на поверхности: зерно — шум в несколько октав,
@@ -19,6 +19,7 @@ import * as THREE from 'three'
 
 const LIB = /* glsl */ `
 varying vec3 vYard;
+varying vec3 vYardN;
 
 float hash21(vec2 p) {
   p = fract(p * vec2(127.1, 311.7));
@@ -99,14 +100,35 @@ float k = grain * (1.0 - 0.14 * mend);
 diffuseColor.rgb *= k;
 `
 
+const WALL = /* glsl */ `
+// Вертикальная грань: развёртка по той мировой оси, вдоль которой она
+// лежит, и по высоте; крыша и фаски — своими материалами, сюда не попадают.
+vec3 an = abs(vYardN);
+vec2 p = an.y > 0.5 ? vYard.xz : (an.x > an.z ? vec2(vYard.z, vYard.y) : vec2(vYard.x, vYard.y));
+// Своя панель — свой тон: клетка и сторона грани.
+vec2 cell = floor(vYard.xz + 0.5 * sign(vYardN.xz));
+float panel = 0.88 + 0.24 * hash21(cell + 0.5 + 0.13 * sign(vYardN.x + vYardN.z));
+// Зерно литого бетона: крупное и мелкое, и поры — редкие тёмные точки.
+float grain = 0.9 + 0.2 * fbm(p * 5.0) + 0.08 * (vnoise(p * 47.0) - 0.5);
+float pore = smoothstep(0.78, 0.9, vnoise(p * 31.0 + 5.0)) * smoothstep(0.62, 0.7, vnoise(p * 9.0));
+// Потёки: шум, вытянутый по вертикали, сильнее к верху панели.
+float streak = fbm(vec2(p.x * 7.0, p.y * 0.8) + 2.0);
+float grime = smoothstep(0.5, 0.75, streak) * (0.4 + 0.6 * smoothstep(0.2, 1.2, p.y));
+float k = panel * grain * (1.0 - 0.35 * pore) * (1.0 - 0.2 * grime);
+diffuseColor.rgb *= k;
+`
+
 const VERTEX = /* glsl */ `
 #include <project_vertex>
 {
   vec4 wp = vec4(transformed, 1.0);
+  vec3 wn = objectNormal;
   #ifdef USE_INSTANCING
   wp = instanceMatrix * wp;
+  wn = mat3(instanceMatrix) * wn;
   #endif
   vYard = (modelMatrix * wp).xyz;
+  vYardN = normalize(mat3(modelMatrix) * wn);
 }
 `
 
@@ -115,7 +137,7 @@ function procedural(material: THREE.MeshStandardMaterial, body: string, key: str
   material.map = null
   material.onBeforeCompile = (shader) => {
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', `#include <common>\nvarying vec3 vYard;`)
+      .replace('#include <common>', `#include <common>\nvarying vec3 vYard;\nvarying vec3 vYardN;`)
       .replace('#include <project_vertex>', VERTEX)
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>\n${LIB}`)
@@ -132,4 +154,8 @@ export function proceduralConcrete(material: THREE.MeshStandardMaterial): void {
 
 export function proceduralAsphalt(material: THREE.MeshStandardMaterial): void {
   procedural(material, ASPHALT, 'yard-asphalt')
+}
+
+export function proceduralWall(material: THREE.MeshStandardMaterial): void {
+  procedural(material, WALL, 'yard-wall')
 }

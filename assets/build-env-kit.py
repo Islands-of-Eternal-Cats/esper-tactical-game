@@ -15,11 +15,12 @@
 а не генерится: стыки по сетке у генерации у каждого куска свои, а фаска на
 ребре при плоской заливке — единственное, чем читается форма.
 
-Материалы плоские, кроме панели стены: у неё бесшовный тайл 512² из
-`gen/textures/` (см. `gen-textures.py`), уже тонированный в палитру. Бетон
-пола и асфальт улицы и крыш — шейдером по мировой координате в рендере
-(`src/render/surface.ts`): материалы `concrete` и `asphalt` рендер узнаёт по
-имени и подменяет им выборку цвета. Пропсы текстур не носят.
+Материалы плоские, текстур нет ни одной. Бетон пола, асфальт улицы и крыш
+и панели стен — шейдером по мировой координате в рендере
+(`src/render/surface.ts`): материалы `concrete`, `asphalt` и `wall` рендер
+узнаёт по имени и подменяет им выборку цвета. `TEXTURES` — точка подключения
+тайла, если какой-то поверхности снова понадобится картинка
+(`gen/textures/gen-textures.py`).
 
 Модули кладутся на сетку симуляции: клетка — метр, начало координат модуля —
 середина его клетки на уровне пола; у настенных пропсов — точка касания
@@ -121,9 +122,7 @@ MATERIALS = {}
 # Тайлы поверхностей: ключ материала → файл в gen/textures/. Тайл уже в
 # цвете палитры, поэтому идёт в Base Color как есть; нет файла — плоский цвет.
 TEX_DIR = os.path.join(ROOT, "assets", "gen", "textures")
-TEXTURES = {
-    "wall": "wall_panel.png",
-}
+TEXTURES = {}
 
 
 def material(key):
@@ -292,14 +291,6 @@ def wall_block():
     return wall_panel("wall_block")
 
 
-def wall_block_b():
-    return wall_panel("wall_block_b", 0.5, 0.25, mirror=True)
-
-
-def wall_block_c():
-    return wall_panel("wall_block_c", 0.25, 0.6)
-
-
 def wall_block_grille():
     """Панель с вентиляционной решёткой: рамка и жалюзи на грани +X."""
     panel = wall_panel("a", 0.7, 0.1, mirror=True)
@@ -321,7 +312,7 @@ def wall_block_plate():
     return join("wall_block_plate", parts)
 
 
-WALL_BLOCKS = ["wall_block", "wall_block_b", "wall_block_c", "wall_block_grille", "wall_block_plate"]
+WALL_BLOCKS = ["wall_block", "wall_block_grille", "wall_block_plate"]
 
 
 def edge_wall():
@@ -483,7 +474,7 @@ def prop_pipe_joint():
 
 MODULES = [
     floor_slab, floor_patch, floor_grate,
-    wall_block, wall_block_b, wall_block_c, wall_block_grille, wall_block_plate,
+    wall_block, wall_block_grille, wall_block_plate,
     edge_wall, edge_corrugated, edge_gate, edge_door, edge_curb, street_tile,
     prop_dumpster, prop_barrel, prop_crate, prop_cart, prop_pallet, prop_lamp_wall, prop_vent, prop_ac, prop_pipe, prop_pipe_joint,
 ]
