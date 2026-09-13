@@ -1,6 +1,6 @@
 /**
- * Контракт `env-kit.glb`: обломки, из которых рендер собирает кучи.
- * По именам он берёт геометрию, значит имена — контракт, а не деталь.
+ * Контракт `env-kit.glb`: модули двора и обломки, из которых рендер собирает
+ * кучи. По именам он берёт геометрию, значит имена — контракт, а не деталь.
  */
 
 import { describe, expect, it } from 'vitest'
@@ -47,10 +47,24 @@ describe('env-kit.glb', () => {
     expect(json.images ?? []).toHaveLength(3)
   })
 
-  it('укладывается в бюджет: обломков в кадре десятки', () => {
+  it('несёт модули двора без текстур: плоские материалы, бюджет 50–300 тр.', () => {
+    const modules = [
+      'floor_slab', 'floor_patch', 'floor_grate', 'wall_block',
+      'prop_dumpster', 'prop_lamp_wall', 'prop_vent', 'prop_ac', 'prop_pipe', 'prop_pipe_joint',
+    ]
+    for (const name of modules) {
+      const mesh = json.meshes.find((m) => m.name === name)
+      expect(mesh, `нет ${name}`).toBeDefined()
+      expect(triangles(name), name).toBeLessThanOrEqual(300)
+    }
+    // Картинок ровно столько, сколько обломков: модули текстур не носят.
+    expect(json.images ?? []).toHaveLength(3)
+  })
+
+  it('укладывается в бюджет: обломков в кадре десятки, плиток — сотни', () => {
     for (const name of ['debris_bag', 'debris_barrel', 'debris_crate']) {
       expect(triangles(name), name).toBeLessThanOrEqual(400)
     }
-    expect(bytes / 1024).toBeLessThanOrEqual(150)
+    expect(bytes / 1024).toBeLessThanOrEqual(200)
   })
 })

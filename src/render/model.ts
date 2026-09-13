@@ -14,6 +14,7 @@
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js'
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 
 const URL_KIT = `${import.meta.env.BASE_URL}models/character-kit.glb`
 
@@ -95,29 +96,68 @@ const URL_ENV = `${import.meta.env.BASE_URL}models/env-kit.glb`
 /** Обломки мусора, из которых рендер собирает кучи. Имена — контракт. */
 export const DEBRIS = ['debris_bag', 'debris_barrel', 'debris_crate'] as const
 
+/** Плитки пола: по клетке на каждую, вариант выбирается хешем клетки. */
+export const FLOORS = ['floor_slab', 'floor_patch', 'floor_grate'] as const
+
+/** Модули двора, которые рендер ставит по раскладке. Имена — контракт. */
+export const MODULES = [
+  ...FLOORS,
+  'wall_block',
+  'prop_dumpster',
+  'prop_lamp_wall',
+  'prop_vent',
+  'prop_ac',
+  'prop_pipe',
+  'prop_pipe_joint',
+] as const
+
+export interface EnvPart {
+  geometry: THREE.BufferGeometry
+  material: THREE.Material | THREE.Material[]
+}
+
 /**
- * Кит окружения: геометрия и материалы пропсов двора по именам. Меши не
+ * Кит окружения: геометрия и материалы модулей двора по именам. Меши не
  * ставятся в сцену сами — рендер инстансирует их сколько нужно.
+ *
+ * Модуль из нескольких материалов загрузчик приносит группой мешей по
+ * примитиву на материал, с именами `имя`, `имя_1`, … Инстансировать группу
+ * нельзя, поэтому примитивы сшиваются обратно в одну геометрию с группами
+ * граней и массивом материалов — это InstancedMesh умеет.
  */
 export class EnvKit {
-  private constructor(private readonly parts: Map<string, THREE.Mesh>) {}
+  private constructor(private readonly parts: Map<string, EnvPart>) {}
 
   static async load(): Promise<EnvKit> {
     const gltf = await new GLTFLoader().loadAsync(URL_ENV)
-    const parts = new Map<string, THREE.Mesh>()
+    const meshes = new Map<string, THREE.Mesh[]>()
     gltf.scene.traverse((o) => {
-      if (o instanceof THREE.Mesh) parts.set(o.name, o)
+      if (!(o instanceof THREE.Mesh)) return
+      const base = o.name.replace(/_\d+$/, '')
+      const list = meshes.get(base) ?? []
+      list.push(o)
+      meshes.set(base, list)
     })
-    for (const name of DEBRIS) {
+    const parts = new Map<string, EnvPart>()
+    for (const [name, list] of meshes) {
+      if (list.length === 1) {
+        parts.set(name, { geometry: list[0]!.geometry, material: list[0]!.material as THREE.Material })
+        continue
+      }
+      const geometry = mergeGeometries(list.map((m) => m.geometry), true)
+      if (geometry === null) throw new Error(`не сшиваются примитивы ${name}`)
+      parts.set(name, { geometry, material: list.map((m) => m.material as THREE.Material) })
+    }
+    for (const name of [...DEBRIS, ...MODULES]) {
       if (!parts.has(name)) throw new Error(`в ките окружения нет ${name}`)
     }
     return new EnvKit(parts)
   }
 
   /** Геометрия и материал по имени — общие, инстансы их не копируют. */
-  part(name: string): { geometry: THREE.BufferGeometry; material: THREE.Material } {
-    const mesh = this.parts.get(name)
-    if (mesh === undefined) throw new Error(`в ките окружения нет ${name}`)
-    return { geometry: mesh.geometry, material: mesh.material as THREE.Material }
+  part(name: string): EnvPart {
+    const part = this.parts.get(name)
+    if (part === undefined) throw new Error(`в ките окружения нет ${name}`)
+    return part
   }
 }

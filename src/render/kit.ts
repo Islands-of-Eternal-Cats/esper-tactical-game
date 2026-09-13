@@ -8,7 +8,7 @@
 import * as THREE from 'three'
 import type { Cell, CatView, PileView, Snapshot, WorldView } from '../shared/protocol'
 import { PALETTE } from './palette'
-import { DEBRIS, type EnvKit } from './model'
+import { DEBRIS, FLOORS, type EnvKit } from './model'
 
 /** Обломков на кучу. Куча тает, теряя их по одному. */
 const CHUNKS = 8
@@ -16,6 +16,8 @@ const MAX_PILES = 64
 
 /** Высота стены. Из неё же считается, что она успевает загородить. */
 const WALL_H = 1.3
+/** Толщина плитки пола: с китом верх плитки — уровень земли симуляции. */
+const FLOOR_H = 0.05
 
 /**
  * Клетки, стена в которых загораживает точку интереса.
@@ -138,6 +140,12 @@ export class Kit {
   /** Номер сплошного блока для каждой стенной клетки. Гаснет блок целиком. */
   private readonly wallBlockOf: number[] = []
   private readonly wallsSolid: THREE.InstancedMesh
+  /** Грейбокс, который кит вытесняет: плита, разметка, куб контейнера. */
+  private readonly slab: THREE.Mesh
+  private readonly grid: THREE.LineSegments
+  private readonly container: THREE.Mesh
+  /** Плитки пола по варианту — только с китом. */
+  private floors: THREE.InstancedMesh[] = []
   /** Оболочка на блок: показывается вместо его кубов, когда блок гаснет. */
   private readonly ghostShells: THREE.Mesh[] = []
   private ghostSignature = -1
@@ -169,6 +177,7 @@ export class Kit {
     )
     slab.position.y = -0.2
     this.root.add(slab)
+    this.slab = slab
 
     const skirt = new THREE.Mesh(
       new THREE.BoxGeometry(width + 0.6, 0.24, height + 0.6),
@@ -192,14 +201,17 @@ export class Kit {
     // Чуть над плитой: на одной высоте линии мерцают в z-буфере.
     grid.position.y = 0.004
     this.root.add(grid)
+    this.grid = grid
 
     // Стены живут двумя наборами на одной геометрии: сплошной и гаснущий.
     // Инстанс переезжает между ними, когда закрывает собой кота.
-    const wallGeo = new THREE.BoxGeometry(1, WALL_H, 1)
+    // Начало координат модуля — на земле, как у модулей кита; коробка
+    // грейбокса приподнята сама, чтобы матрицы инстансов были общими.
+    const wallGeo = new THREE.BoxGeometry(1, WALL_H, 1).translate(0, WALL_H / 2, 0)
     const v = new THREE.Vector3()
     world.walls.forEach((cell, i) => {
       cellToWorld(cell, world, v)
-      this.wallMatrices.push(new THREE.Matrix4().makeTranslation(v.x, WALL_H / 2, v.z))
+      this.wallMatrices.push(new THREE.Matrix4().makeTranslation(v.x, 0, v.z))
       this.wallIndexByCell.set(cell.y * width + cell.x, i)
     })
 
@@ -246,12 +258,13 @@ export class Kit {
     }
 
     const container = new THREE.Mesh(
-      new THREE.BoxGeometry(1.5, 1.05, 1.5),
+      new THREE.BoxGeometry(1.5, 1.05, 1.5).translate(0, 0.52, 0),
       new THREE.MeshLambertMaterial({ color: PALETTE.container }),
     )
     cellToWorld(world.container, world, v)
-    container.position.set(v.x, 0.52, v.z)
+    container.position.set(v.x, 0, v.z)
     this.root.add(container)
+    this.container = container
 
     this.piles = [
       new THREE.InstancedMesh(
@@ -367,8 +380,9 @@ export class Kit {
     })
   }
 
-  /** Кит окружения приехал: кучи пересобираются из настоящих обломков. */
+  /** Кит окружения приехал: грейбокс уступает модулям, кучи — обломкам. */
   setEnv(env: EnvKit): void {
+    this.dress(env)
     for (const mesh of this.piles) {
       this.root.remove(mesh)
       // Геометрия коробки — своя, материал кита — общий, его не трогаем.
@@ -385,6 +399,57 @@ export class Kit {
       return mesh
     })
     this.syncPiles(this.lastPiles)
+  }
+
+  /**
+   * Двор из модулей кита поверх раскладки грейбокса.
+   *
+   * Плитки — по клетке, вариант и поворот от хеша клетки: пол не ровный,
+   * но и не пляшет между сидами. Разметка гаснет: швы плиток — та же сетка.
+   * Стены и контейнер меняют геометрию, оставаясь на своих местах.
+   */
+  private dress(env: EnvKit): void {
+    const { width, height } = this.world
+    this.floors = FLOORS.map((name) => {
+      const { geometry, material } = env.part(name)
+      const mesh = new THREE.InstancedMesh(geometry, material, width * height)
+      mesh.count = 0
+      this.root.add(mesh)
+      return mesh
+    })
+    const counts = this.floors.map(() => 0)
+    const cell: Cell = { x: 0, y: 0 }
+    for (cell.y = 0; cell.y < height; cell.y++) {
+      for (cell.x = 0; cell.x < width; cell.x++) {
+        const id = `${cell.x}:${cell.y}`
+        const r = hash01(id, 1)
+        // Латок немного, стоков ещё меньше: двор чинили, но не украшали.
+        const kind = r < 0.86 ? 0 : r < 0.95 ? 1 : 2
+        cellToWorld(cell, this.world, this.pos)
+        this.pos.y = -FLOOR_H
+        this.q.setFromAxisAngle(AXIS_Y, Math.floor(hash01(id, 2) * 4) * (Math.PI / 2))
+        this.scl.setScalar(1)
+        this.floors[kind]!.setMatrixAt(counts[kind]!++, this.m.compose(this.pos, this.q, this.scl))
+      }
+    }
+    this.floors.forEach((mesh, k) => {
+      mesh.count = counts[k]!
+      mesh.instanceMatrix.needsUpdate = true
+    })
+    this.grid.visible = false
+    this.slab.position.y -= FLOOR_H
+
+    const wall = env.part('wall_block')
+    this.wallsSolid.geometry.dispose()
+    ;(this.wallsSolid.material as THREE.Material).dispose()
+    this.wallsSolid.geometry = wall.geometry
+    this.wallsSolid.material = wall.material
+
+    const dumpster = env.part('prop_dumpster')
+    this.container.geometry.dispose()
+    ;(this.container.material as THREE.Material).dispose()
+    this.container.geometry = dumpster.geometry
+    this.container.material = dumpster.material
   }
 
   private syncPiles(piles: readonly PileView[]): void {
@@ -446,9 +511,14 @@ export class Kit {
 
   dispose(): void {
     this.scene.remove(this.root)
-    // Геометрия и материалы обломков — общее добро кита окружения: снять их
-    // из дерева до общей уборки, иначе следующий двор получит пустые кучи.
+    // Геометрия и материалы кита окружения — общее добро: снять их из
+    // дерева до общей уборки, иначе следующий двор получит пустые кучи.
     if (this.piles.length > 1) for (const mesh of this.piles) this.root.remove(mesh)
+    for (const mesh of this.floors) this.root.remove(mesh)
+    if (this.floors.length > 0) {
+      this.root.remove(this.wallsSolid)
+      this.root.remove(this.container)
+    }
     disposeTree(this.root)
   }
 }
