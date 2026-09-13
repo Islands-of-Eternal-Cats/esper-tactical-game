@@ -11,13 +11,19 @@
 
 import * as THREE from 'three'
 
-const RINGS = 14
-const SIDES = 6
+const RINGS = 20
+const SIDES = 7
 const RADIUS = 0.03
 
-/** Провис второй управляющей точки — между плечом и рукоятью. */
-const SAG = 0.14
-const SPRING_RATE = 10
+/**
+ * Как у ранцевого пылесоса: шланг выходит из бака сбоку у низа, уходит
+ * петлёй наружу и вниз — до колена — и уже снизу поднимается к рукояти.
+ * Длинная свободная петля читается шлангом издалека; короткая дуга через
+ * плечо сливалась с корпусом.
+ */
+const LOOP_OUT = 0.22
+const LOOP_DOWN = 0.30
+const SPRING_RATE = 8
 
 export class Hose {
   readonly mesh: THREE.Mesh
@@ -25,10 +31,10 @@ export class Hose {
   private readonly positions: Float32Array
   private readonly normals: Float32Array
   private readonly curve = new THREE.CatmullRomCurve3([
-    new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(),
+    new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(),
   ])
-  /** Управляющие точки провиса, ведутся пружиной за целью. */
-  private readonly ctrl = [new THREE.Vector3(), new THREE.Vector3()]
+  /** Управляющие точки петли, ведутся пружиной за целью. */
+  private readonly ctrl = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()]
   private readonly target = new THREE.Vector3()
   private primed = false
 
@@ -60,16 +66,28 @@ export class Hose {
   }
 
   /**
-   * Перестроить трубу от `from` через `over` (точка над плечом — шланг
-   * идёт по нему, а не сквозь корпус) к `to`, всё в системе координат меша.
+   * Перестроить трубу от `from` (выход из бака) к `to` (рукоять). `side` —
+   * единичный вектор наружу, вбок от кота; всё в системе координат меша.
    */
-  update(from: THREE.Vector3, over: THREE.Vector3, to: THREE.Vector3, dt: number): void {
+  update(from: THREE.Vector3, to: THREE.Vector3, side: THREE.Vector3, dt: number): void {
     const pts = this.curve.points
     pts[0]!.copy(from)
-    pts[3]!.copy(to)
-    for (let i = 0; i < 2; i++) {
-      if (i === 0) this.target.copy(over)
-      else this.target.lerpVectors(over, to, 0.55).setY(Math.min(over.y, to.y) - SAG)
+    pts[4]!.copy(to)
+    for (let i = 0; i < 3; i++) {
+      if (i === 0) {
+        // Сразу от бака — наружу и назад: шланг отходит от стенки и не
+        // режет бок кота, который прямо перед ранцем.
+        this.target.copy(from).addScaledVector(side, LOOP_OUT * 0.7).setY(from.y - 0.08)
+        this.target.z -= 0.10
+      } else if (i === 1) {
+        // Низ петли — на уровне колена, снаружи.
+        this.target.lerpVectors(from, to, 0.45).addScaledVector(side, LOOP_OUT)
+        this.target.y = Math.min(from.y, to.y) - LOOP_DOWN
+      } else {
+        // Подход к рукояти снизу-сбоку.
+        this.target.lerpVectors(from, to, 0.85).addScaledVector(side, LOOP_OUT * 0.5)
+        this.target.y = to.y - 0.12
+      }
       const ctrl = this.ctrl[i]!
       if (!this.primed) ctrl.copy(this.target)
       else ctrl.lerp(this.target, 1 - Math.exp(-SPRING_RATE * dt))
