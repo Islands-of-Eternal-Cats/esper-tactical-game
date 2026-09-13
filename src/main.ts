@@ -6,6 +6,7 @@
  */
 
 import { DEFAULT_ZONE_RADIUS, type Command, type Snapshot, type Speed, type WorkerMessage, type WorldView } from './shared/protocol'
+import { loadKits } from './render/model'
 import { SceneView } from './render/scene'
 import { Hud } from './ui/hud'
 
@@ -32,6 +33,13 @@ function seedFromLocation(): number | null {
 function rememberSeed(seed: number): void {
   window.history.replaceState(null, '', `#${seed}`)
 }
+
+// Киты запрашиваются первыми: это самое тяжёлое, и ждать сцены незачем.
+// До первого байта полоска пульсирует, с первым — показывает долю.
+const kits = loadKits((fraction) => {
+  veil.classList.add('loading')
+  veilBar.style.width = `${Math.round(fraction * 100)}%`
+})
 
 const worker = new Worker(new URL('./worker/sim.worker.ts', import.meta.url), { type: 'module' })
 
@@ -81,10 +89,7 @@ worker.onmessage = (e: MessageEvent<WorkerMessage>): void => {
       scene = new SceneView(canvas, world, {
         onIntent: (cell) => send({ t: 'setZone', cell, radius: DEFAULT_ZONE_RADIUS }),
         onClearIntent: () => send({ t: 'clearZone' }),
-        onProgress: (fraction) => {
-          veilBar.style.width = `${Math.round(fraction * 100)}%`
-        },
-      })
+      }, kits)
       // Отладка из консоли браузера: заглянуть в граф сцены. Только в dev.
       if (import.meta.env.DEV) (window as unknown as { __scene: SceneView }).__scene = scene
       // Занавес до китов: иначе первые секунды по двору бегает капсула.
@@ -93,6 +98,7 @@ worker.onmessage = (e: MessageEvent<WorkerMessage>): void => {
       // поэтому занавес уходит без чёрной вспышки.
       send({ t: 'setSpeed', speed: 0 })
       void scene.ready.then(() => {
+        veil.classList.add('loading')
         veilBar.style.width = '100%'
         veil.classList.add('gone')
         send({ t: 'setSpeed', speed })

@@ -9,13 +9,11 @@ import * as THREE from 'three'
 import type { Cell, Snapshot, WorldView } from '../shared/protocol'
 import { IsoCamera } from './camera'
 import { Cats } from './cats'
-import { CatKit, EnvKit } from './model'
+import { type CatKit, type EnvKit, type KitLoads } from './model'
 import { Kit, worldToCell } from './kit'
 import { PALETTE } from './palette'
 
 export interface SceneHandlers {
-  /** Загрузка китов, 0…1: для полоски под занавесом. */
-  onProgress?: (fraction: number) => void
   onIntent: (cell: Cell) => void
   onClearIntent: () => void
 }
@@ -68,6 +66,7 @@ export class SceneView {
     private readonly canvas: HTMLCanvasElement,
     world: WorldView,
     handlers: SceneHandlers,
+    kits: KitLoads,
   ) {
     this.world = world
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true })
@@ -127,29 +126,19 @@ export class SceneView {
       this.contextLost = false
     })
 
-    // Киты грузятся в фоне: сцена уже работает на грейбоксе, и падение
-    // загрузки не уносит с собой игру. Но показывать грейбокс не надо — до
-    // `ready` главный поток держит занавес; капсула остаётся запасным путём.
-    // Одна шкала на оба файла: пока сервер не назвал размер, берётся
-    // ожидаемый — иначе полоска прыгает, когда второй файл отзывается.
-    const expected = [620_000, 290_000]
-    const loaded = [0, 0]
-    const total = [...expected]
-    const report = (i: number) => (got: number, all: number): void => {
-      loaded[i] = got
-      if (all > 0) total[i] = all
-      const sum = (xs: number[]): number => xs.reduce((a, b) => a + b, 0)
-      handlers.onProgress?.(Math.min(1, sum(loaded) / sum(total)))
-    }
+    // Киты уже грузятся с самого старта; сцена до них работает на грейбоксе,
+    // и падение загрузки не уносит с собой игру. Но показывать грейбокс не
+    // надо — до `ready` главный поток держит занавес; капсула остаётся
+    // запасным путём.
     this.ready = Promise.allSettled([
-      CatKit.load(report(0)).then(
+      kits.cat.then(
         (kit) => {
           this.catKit = kit
           this.cats.setKit(kit)
         },
         (err: unknown) => console.warn('кит персонажей не загрузился, остаёмся на капсуле', err),
       ),
-      EnvKit.load(report(1)).then(
+      kits.env.then(
         (env) => {
           this.envKit = env
           this.kit.setEnv(env)

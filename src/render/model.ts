@@ -22,6 +22,32 @@ const URL_KIT = `${import.meta.env.BASE_URL}models/character-kit.glb`
 /** Ход загрузки: байт получено и байт всего (0, пока сервер не сказал). */
 export type Progress = (loaded: number, total: number) => void
 
+export interface KitLoads {
+  cat: Promise<CatKit>
+  env: Promise<EnvKit>
+}
+
+/**
+ * Оба кита разом, одной шкалой прогресса. Запускается при старте главного
+ * потока, до того как воркер объявит двор: киты — самое тяжёлое в загрузке,
+ * и ждать сцены, чтобы их запросить, значит терять секунду на медленной сети.
+ *
+ * Пока сервер не назвал размер, знаменатель — ожидаемый: иначе полоска
+ * прыгает назад, когда второй файл отзывается.
+ */
+export function loadKits(onProgress: (fraction: number) => void): KitLoads {
+  const expected = [620_000, 290_000]
+  const loaded = [0, 0]
+  const total = [...expected]
+  const report = (i: number): Progress => (got, all) => {
+    loaded[i] = got
+    if (all > 0) total[i] = all
+    const sum = (xs: number[]): number => xs.reduce((a, b) => a + b, 0)
+    onProgress(Math.min(1, sum(loaded) / sum(total)))
+  }
+  return { cat: CatKit.load(report(0)), env: EnvKit.load(report(1)) }
+}
+
 function progress(on?: Progress): ((e: ProgressEvent) => void) | undefined {
   return on === undefined ? undefined : (e) => on(e.loaded, e.lengthComputable ? e.total : 0)
 }
