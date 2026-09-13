@@ -725,16 +725,18 @@ def arm(side, swing, elbow):
     }
 
 
-def spine(lean, twist=0.0, rise=0.0):
+def spine(lean, twist=0.0, rise=0.0, hips_twist=True):
     """Корпус: наклон вперёд, скрутка плеч и подъём таза.
 
     Таз двигается смещением кости, а не всей фигуры: позицию кота в мире
-    ведёт код, и root motion в клипе с ней воевал бы.
+    ведёт код, и root motion в клипе с ней воевал бы. Скрутка таза — только
+    там, где ноги идут (шаг): стоя на месте, таз крутить нельзя — ноги
+    висят на нём, и стопы едут по асфальту дугой.
     """
     return {
-        RIG + "Hips": [(Z, -twist)],
+        RIG + "Hips": [(Z, -twist if hips_twist else 0.0)],
         RIG + "Spine": [(X, lean * 0.45)],
-        RIG + "Spine1": [(X, lean * 0.55), (Z, twist * 1.4)],
+        RIG + "Spine1": [(X, lean * 0.55), (Z, twist * (1.4 if hips_twist else 1.0))],
         # Голову клипы не трогают: её рысканье — внимание кота, им управляет
         # рантайм, и трек в клипе затирал бы взгляд. Шея компенсирует наклон
         # корпуса лишь отчасти: у Tripo голова сидит прямо на воротнике, и
@@ -895,7 +897,7 @@ def vacuum(sweep, dip):
     Медленно и широко: частая мелкая дрожь читается не работой, а тиком.
     """
     return merge(
-        spine(0.30, twist=sweep * 0.20, rise=-CROUCH - 0.02 - dip),
+        spine(0.30, twist=sweep * 0.20, rise=-CROUCH - 0.02 - dip, hips_twist=False),
         {
             # Взмах — вокруг вертикали: рука уже вынесена вперёд, и поворот
             # вокруг Y (оси «вперёд») её не разводит в стороны, а закручивает.
@@ -945,7 +947,7 @@ def DUMP():
 def breathing(t, side, ear):
     """Покой: дыхание, перенос веса и живой хвост. Кот не статуя и не дрожит."""
     return merge(
-        spine(0.03 + t * 0.035, twist=side * 0.03, rise=-CROUCH + t * 0.010),
+        spine(0.03 + t * 0.035, twist=side * 0.03, rise=-CROUCH + t * 0.010, hips_twist=False),
         arm("Left", 0.0, -0.16),
         arm("Right", 0.0, -0.16),
         standing(-CROUCH + t * 0.010),
