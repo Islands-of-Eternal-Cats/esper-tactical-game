@@ -6,7 +6,7 @@
  * Сид разбрасывает мусор — это единственное, что меняется от прохода к проходу.
  */
 
-import type { Cell } from '../shared/protocol'
+import type { Cell, PropView } from '../shared/protocol'
 import { UNIT } from './fixed'
 import { Grid } from './grid'
 import { Rng } from './rng'
@@ -28,9 +28,27 @@ const BLOCKS: readonly Block[] = [
   { x0: 10, y0: 14, x1: 16, y1: 15 },
 ]
 
+/**
+ * Реквизит на полу: бочки, ящики, тележка, поддон. Тоже заданы руками и
+ * тоже препятствия — кот их обходит, а мусор у них скапливается, как у
+ * стен. Стоят у ограды и у торцов блоков, где такому и место; вокруг
+ * контейнера и в углах, куда тесты и отладка шлют кота, — пусто.
+ */
+const PROPS: readonly PropView[] = [
+  { cell: { x: 0, y: 3 }, kind: 'barrels', turn: 0 },
+  { cell: { x: 0, y: 4 }, kind: 'barrels', turn: 1 },
+  { cell: { x: 0, y: 10 }, kind: 'crates', turn: 0 },
+  { cell: { x: 9, y: 0 }, kind: 'cart', turn: 1 },
+  { cell: { x: 15, y: 0 }, kind: 'pallet', turn: 0 },
+  { cell: { x: 9, y: 6 }, kind: 'crates', turn: 2 },
+  { cell: { x: 13, y: 10 }, kind: 'barrels', turn: 2 },
+  { cell: { x: 19, y: 8 }, kind: 'cart', turn: 3 },
+  { cell: { x: 3, y: 18 }, kind: 'pallet', turn: 1 },
+]
+
 export const CONTAINER: Cell = { x: 17, y: 17 }
 
-export function buildGrid(): { grid: Grid; walls: Cell[] } {
+export function buildGrid(): { grid: Grid; walls: Cell[]; props: PropView[] } {
   const grid = new Grid(GRID_W, GRID_H)
   const walls: Cell[] = []
   for (const b of BLOCKS) {
@@ -41,7 +59,9 @@ export function buildGrid(): { grid: Grid; walls: Cell[] } {
       }
     }
   }
-  return { grid, walls }
+  const props = PROPS.map((p) => ({ ...p, cell: { ...p.cell } }))
+  for (const p of props) grid.setBlocked(p.cell.x, p.cell.y, true)
+  return { grid, walls, props }
 }
 
 /** Клетки, куда кот вообще может дойти от контейнера. */

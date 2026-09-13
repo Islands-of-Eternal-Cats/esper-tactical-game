@@ -43,11 +43,22 @@ export type Command =
  * двора, стены и контейнер, а они не меняются, и слать их в каждом снапшоте —
  * это платить за неизменное 20 раз в секунду.
  */
+/** Крупный реквизит на полу: занимает клетку, как стена, но выглядит собой. */
+export type PropKind = 'barrels' | 'crates' | 'cart' | 'pallet'
+
+export interface PropView {
+  cell: Cell
+  kind: PropKind
+  /** Поворот в четвертях оборота: раскладка задаёт, рендер поворачивает. */
+  turn: 0 | 1 | 2 | 3
+}
+
 export interface WorldView {
   seed: number
   width: number
   height: number
   walls: Cell[]
+  props: PropView[]
   container: Cell
 }
 

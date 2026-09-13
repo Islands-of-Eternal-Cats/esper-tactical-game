@@ -49,7 +49,7 @@ describe('env-kit.glb', () => {
   it('несёт модули двора без текстур: плоские материалы, бюджет 50–300 тр.', () => {
     const modules = [
       'floor_slab', 'floor_patch', 'floor_grate', 'wall_block', 'edge_wall', 'edge_curb', 'street_tile',
-      'prop_dumpster', 'prop_lamp_wall', 'prop_vent', 'prop_ac', 'prop_pipe', 'prop_pipe_joint',
+      'prop_dumpster', 'prop_barrel', 'prop_crate', 'prop_cart', 'prop_pallet', 'prop_lamp_wall', 'prop_vent', 'prop_ac', 'prop_pipe', 'prop_pipe_joint',
     ]
     for (const name of modules) {
       const mesh = json.meshes.find((m) => m.name === name)
@@ -65,6 +65,6 @@ describe('env-kit.glb', () => {
     for (const name of ['debris_bag', 'debris_barrel', 'debris_crate']) {
       expect(triangles(name), name).toBeLessThanOrEqual(400)
     }
-    expect(bytes / 1024).toBeLessThanOrEqual(200)
+    expect(bytes / 1024).toBeLessThanOrEqual(260)
   })
 })

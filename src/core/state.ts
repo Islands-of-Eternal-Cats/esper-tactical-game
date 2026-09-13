@@ -5,7 +5,7 @@
  * появляется только на границе, в снапшоте.
  */
 
-import type { Cell, Dir } from '../shared/protocol'
+import type { Cell, Dir, PropView } from '../shared/protocol'
 import type { Grid } from './grid'
 import type { Rng } from './rng'
 
@@ -72,6 +72,7 @@ export interface State {
   grid: Grid
   rng: Rng
   walls: Cell[]
+  props: PropView[]
   container: Cell
   /** Отсортированы по id и никогда не переупорядочиваются. */
   piles: Pile[]

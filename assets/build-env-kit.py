@@ -112,6 +112,9 @@ COLOURS = {
     "rubber": (0.018, 0.017, 0.016, 1.0),
     "asphalt": (0.023, 0.028, 0.038, 1.0),
     "roof": (0.016, 0.019, 0.024, 1.0),
+    # Дерево — единственное тёплое пятно среди пропсов, и то приглушённое.
+    "wood": (0.075, 0.058, 0.040, 1.0),
+    "wood_dark": (0.040, 0.030, 0.020, 1.0),
     "lamp_glow": (1.0, 0.62, 0.22, 1.0),
 }
 MATERIALS = {}
@@ -291,6 +294,53 @@ def prop_dumpster():
     return join("prop_dumpster", parts)
 
 
+def prop_barrel():
+    """Бочка: корпус и два обруча. Начало — центр дна."""
+    body = cylinder("a", 0.27, 0.82, verts=12, colour="steel")
+    parts = [body]
+    for z in (0.2, 0.6):
+        parts.append(cylinder("b", 0.29, 0.05, at=(0, 0, z), verts=12, colour="steel_dark"))
+    parts.append(cylinder("c", 0.24, 0.03, at=(0, 0, 0.82), verts=12, colour="steel_dark"))
+    return join("prop_barrel", parts)
+
+
+def prop_crate():
+    """Ящик 0.7 м: корпус и рейки по рёбрам. Начало — центр дна."""
+    body = box("a", (0.7, 0.7, 0.7), bevel=0.02, colour="wood")
+    parts = [body]
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            parts.append(box("b", (0.07, 0.07, 0.72), at=(sx * 0.34, sy * 0.34, 0), colour="wood_dark"))
+    for z in (0.05, 0.62):
+        for sy in (-1, 1):
+            parts.append(box("c", (0.74, 0.06, 0.06), at=(0, sy * 0.36, z), colour="wood_dark"))
+        for sx in (-1, 1):
+            parts.append(box("c", (0.06, 0.74, 0.06), at=(sx * 0.36, 0, z), colour="wood_dark"))
+    return join("prop_crate", parts)
+
+
+def prop_cart():
+    """Тележка дворника: корыто на двух колёсах, ручки назад (−Y)."""
+    tub = box("a", (0.9, 0.7, 0.5), at=(0, 0, 0.3), bevel=0.03, colour="steel")
+    parts = [tub]
+    for sx in (-1, 1):
+        parts.append(cylinder("b", 0.17, 0.08, at=(sx * 0.42, 0.1, 0.17), axis="X", verts=10, colour="rubber", bottom=False))
+        parts.append(cylinder("c", 0.025, 0.55, at=(sx * 0.3, -0.35, 0.55), axis="Y", verts=6, colour="steel_dark", bottom=False))
+        parts.append(box("d", (0.05, 0.05, 0.3), at=(sx * 0.3, -0.5, 0.15), colour="steel_dark"))
+    parts.append(cylinder("e", 0.025, 0.65, at=(0, -0.62, 0.55), axis="X", verts=6, colour="steel_dark", bottom=False))
+    return join("prop_cart", parts)
+
+
+def prop_pallet():
+    """Поддон: три бруса и настил. Низкий — глаз цепляется за него на полу."""
+    parts = []
+    for y in (-0.42, 0, 0.42):
+        parts.append(box("a", (1.1, 0.1, 0.09), at=(0, y, 0), colour="wood_dark"))
+    for i in range(5):
+        parts.append(box("b", (0.16, 1.0, 0.03), at=(-0.44 + i * 0.22, 0, 0.09), colour="wood"))
+    return join("prop_pallet", parts)
+
+
 def prop_lamp_wall():
     """Настенный светильник. Начало — точка на стене, светит вдоль +Y от неё.
 
@@ -338,7 +388,7 @@ def prop_pipe_joint():
 
 MODULES = [
     floor_slab, floor_patch, floor_grate, wall_block, edge_wall, edge_curb, street_tile,
-    prop_dumpster, prop_lamp_wall, prop_vent, prop_ac, prop_pipe, prop_pipe_joint,
+    prop_dumpster, prop_barrel, prop_crate, prop_cart, prop_pallet, prop_lamp_wall, prop_vent, prop_ac, prop_pipe, prop_pipe_joint,
 ]
 
 

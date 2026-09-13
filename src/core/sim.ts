@@ -86,7 +86,7 @@ export class Sim {
   }
 
   private static create(seed: number): State {
-    const { grid, walls } = buildGrid()
+    const { grid, walls, props } = buildGrid()
     const rng = new Rng(seed)
     const piles = placePiles(grid, rng, CONTAINER)
     const cat: Cat = {
@@ -113,6 +113,7 @@ export class Sim {
       grid,
       rng,
       walls,
+      props,
       container: { ...CONTAINER },
       piles,
       cats: [cat],
@@ -489,6 +490,7 @@ export class Sim {
       width: s.grid.width,
       height: s.grid.height,
       walls: s.walls.map((c) => ({ ...c })),
+      props: s.props.map((p) => ({ ...p, cell: { ...p.cell } })),
       container: { ...s.container },
     }
   }

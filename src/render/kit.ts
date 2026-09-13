@@ -6,7 +6,7 @@
  */
 
 import * as THREE from 'three'
-import type { Cell, CatView, PileView, Snapshot, WorldView } from '../shared/protocol'
+import type { Cell, CatView, PileView, PropKind, Snapshot, WorldView } from '../shared/protocol'
 import { PALETTE } from './palette'
 import { DEBRIS, FLOORS, type EnvKit } from './model'
 
@@ -169,6 +169,8 @@ export class Kit {
   private floors: THREE.InstancedMesh[] = []
   /** Пропсы двора по модулю — только с китом. */
   private props: THREE.InstancedMesh[] = []
+  /** Грейбокс реквизита на полу: коробки на занятых клетках до кита. */
+  private readonly propBoxes: THREE.InstancedMesh
   private readonly lamps: THREE.PointLight[] = []
   private readonly blocks: Cell[][]
   /** Оболочка на блок: показывается вместо его кубов, когда блок гаснет. */
@@ -295,6 +297,21 @@ export class Kit {
     container.castShadow = true
     this.root.add(container)
     this.container = container
+
+    // Реквизит на полу — препятствия симуляции; в грейбоксе это коробки
+    // пониже стен, чтобы читались занятыми клетками, а не стенами.
+    this.propBoxes = new THREE.InstancedMesh(
+      new THREE.BoxGeometry(0.8, 0.7, 0.8).translate(0, 0.35, 0),
+      new THREE.MeshLambertMaterial({ color: PALETTE.container }),
+      Math.max(1, world.props.length),
+    )
+    world.props.forEach((prop, i) => {
+      cellToWorld(prop.cell, world, v)
+      this.propBoxes.setMatrixAt(i, new THREE.Matrix4().makeTranslation(v.x, 0, v.z))
+    })
+    this.propBoxes.count = world.props.length
+    this.propBoxes.castShadow = true
+    this.root.add(this.propBoxes)
 
     this.piles = [
       new THREE.InstancedMesh(
@@ -486,6 +503,70 @@ export class Kit {
     this.container.material = dumpster.material
 
     this.dressBlocks(env)
+    this.dressProps(env)
+  }
+
+  /**
+   * Реквизит на полу из модулей кита: в клетке — не один предмет, а
+   * небольшая группа, как её оставили бы люди. Раскладка группы — своя на
+   * вид, поворот — из мира, разброс — от хеша клетки.
+   */
+  private dressProps(env: EnvKit): void {
+    this.propBoxes.visible = false
+    const kinds = ['prop_barrel', 'prop_crate', 'prop_cart', 'prop_pallet'] as const
+    type Kind = (typeof kinds)[number]
+    const matrices = new Map<Kind, THREE.Matrix4[]>()
+    for (const kind of kinds) matrices.set(kind, [])
+    const centre = new THREE.Vector3()
+    const put = (kind: Kind, dx: number, dz: number, y: number, yaw: number, scale = 1): void => {
+      this.pos.set(centre.x + dx, y, centre.z + dz)
+      this.q.setFromAxisAngle(AXIS_Y, yaw)
+      this.scl.setScalar(scale)
+      matrices.get(kind)!.push(this.m.compose(this.pos, this.q, this.scl).clone())
+    }
+
+    for (const prop of this.world.props) {
+      cellToWorld(prop.cell, this.world, centre)
+      const id = `prop${prop.cell.x}:${prop.cell.y}`
+      const base = prop.turn * (Math.PI / 2)
+      const cos = Math.cos(base)
+      const sin = Math.sin(base)
+      // Смещения в группе — в осях группы, поворачиваются вместе с ней.
+      const local = (kind: Kind, u: number, v: number, y: number, yaw: number, scale = 1): void =>
+        put(kind, u * cos - v * sin, u * sin + v * cos, y, base + yaw, scale)
+
+      const layouts: Record<PropKind, () => void> = {
+        barrels: () => {
+          local('prop_barrel', -0.2, -0.18, 0, hash01(id, 1) * Math.PI)
+          local('prop_barrel', 0.24, -0.1, 0, hash01(id, 2) * Math.PI, 0.96)
+          if (hash01(id, 3) < 0.7) local('prop_barrel', 0.02, 0.28, 0, hash01(id, 4) * Math.PI, 0.9)
+        },
+        crates: () => {
+          local('prop_crate', -0.12, 0.05, 0, 0)
+          local('prop_crate', -0.1, 0.02, 0.7, (hash01(id, 1) - 0.5) * 0.4, 0.86)
+          local('prop_crate', 0.4, -0.3, 0, 0.3, 0.6)
+        },
+        cart: () => local('prop_cart', 0, 0, 0, (hash01(id, 1) - 0.5) * 0.3),
+        pallet: () => {
+          local('prop_pallet', 0, 0, 0, (hash01(id, 1) - 0.5) * 0.2)
+          if (hash01(id, 2) < 0.6) local('prop_barrel', 0.1, 0.05, 0.12, hash01(id, 3) * Math.PI, 0.9)
+        },
+      }
+      layouts[prop.kind]()
+    }
+
+    this.props.push(...kinds.map((kind) => {
+      const list = matrices.get(kind)!
+      const { geometry, material } = env.part(kind)
+      const mesh = new THREE.InstancedMesh(geometry, material, Math.max(1, list.length))
+      list.forEach((m, i) => mesh.setMatrixAt(i, m))
+      mesh.count = list.length
+      mesh.instanceMatrix.needsUpdate = true
+      mesh.castShadow = true
+      mesh.receiveShadow = true
+      this.root.add(mesh)
+      return mesh
+    }))
   }
 
   /**
