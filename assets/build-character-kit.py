@@ -355,6 +355,9 @@ def build_cat(rig):
     for obj in (body, head):
         fill_orphans(obj, rig)
     clean_head_texture(head, atlas)
+    # Цвет вершин в GLB не идёт: карта лежит в том же файле, и «запасной
+    # путь на случай, если картинка не доедет» не срабатывает никогда, а
+    # весит 30 КБ. Во вьюпорте Blender он остаётся удобством.
     paint_from_texture(body, atlas)
     paint_from_texture(head, atlas)
     return body, head
@@ -525,7 +528,7 @@ def confine_tail(obj, rig):
         for ge in v.groups:
             obj.vertex_groups[ge.group].add([v.index], ge.weight / total, "REPLACE")
 PROP_TRIS = 800
-PROP_TEXTURE = 512
+PROP_TEXTURE = 256
 
 
 def import_prop(name, filename, length, grip_top=True, align=True, origin="grip", tris=PROP_TRIS):
@@ -1156,7 +1159,7 @@ def main():
         export_yup=True,
         export_apply=True,
         export_skins=True,
-        export_vertex_color="ACTIVE",
+        export_vertex_color="NONE",
         export_animations=True,
         export_extras=True,
         export_animation_mode="ACTIONS",

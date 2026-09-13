@@ -11,6 +11,7 @@ const GLB = fileURLToPath(new URL('../public/models/env-kit.glb', import.meta.ur
 
 interface Gltf {
   meshes: { name: string; primitives: { indices: number; attributes: Record<string, number> }[] }[]
+  nodes: { name: string; mesh?: number; children?: number[] }[]
   accessors: { count: number }[]
   images?: unknown[]
 }
@@ -31,17 +32,36 @@ function readGlb(): { json: Gltf; bytes: number } {
 
 const { json, bytes } = readGlb()
 
+/**
+ * Меши модуля: под именованным узлом, в безымянных потомках — так
+ * раскладывает gltfpack, имена мешей он не хранит.
+ */
+function meshesOf(name: string): Gltf['meshes'] {
+  const root = json.nodes.findIndex((n) => n.name === name)
+  if (root < 0) throw new Error(`нет узла ${name}`)
+  const out: Gltf['meshes'] = []
+  const queue = [root]
+  for (let head = 0; head < queue.length; head++) {
+    const n = json.nodes[queue[head]!]!
+    if (n.mesh !== undefined) out.push(json.meshes[n.mesh]!)
+    for (const c of n.children ?? []) queue.push(c)
+  }
+  if (out.length === 0) throw new Error(`под ${name} нет меша`)
+  return out
+}
+
 function triangles(name: string): number {
-  const mesh = json.meshes.find((m) => m.name === name)
-  if (mesh === undefined) throw new Error(`нет меша ${name}`)
-  return mesh.primitives.reduce((sum, p) => sum + json.accessors[p.indices]!.count / 3, 0)
+  let sum = 0
+  for (const mesh of meshesOf(name)) {
+    for (const p of mesh.primitives) sum += json.accessors[p.indices]!.count / 3
+  }
+  return sum
 }
 
 describe('env-kit.glb', () => {
   it('несёт обломки под именами из контракта, с UV и картой', () => {
     for (const name of ['debris_bag', 'debris_barrel', 'debris_crate']) {
-      const mesh = json.meshes.find((m) => m.name === name)
-      expect(mesh, `нет ${name}`).toBeDefined()
+      const [mesh] = meshesOf(name)
       expect(mesh?.primitives[0]?.attributes.TEXCOORD_0, `${name} без UV`).toBeDefined()
     }
   })
@@ -52,8 +72,6 @@ describe('env-kit.glb', () => {
       'prop_dumpster', 'prop_barrel', 'prop_crate', 'prop_cart', 'prop_pallet', 'prop_lamp_wall', 'prop_vent', 'prop_ac', 'prop_pipe', 'prop_pipe_joint',
     ]
     for (const name of modules) {
-      const mesh = json.meshes.find((m) => m.name === name)
-      expect(mesh, `нет ${name}`).toBeDefined()
       expect(triangles(name), name).toBeLessThanOrEqual(300)
     }
     // Картинки: только карты трёх обломков. Поверхности двора — шейдером
@@ -65,6 +83,6 @@ describe('env-kit.glb', () => {
     for (const name of ['debris_bag', 'debris_barrel', 'debris_crate']) {
       expect(triangles(name), name).toBeLessThanOrEqual(400)
     }
-    expect(bytes / 1024).toBeLessThanOrEqual(400)
+    expect(bytes / 1024).toBeLessThanOrEqual(160)
   })
 })

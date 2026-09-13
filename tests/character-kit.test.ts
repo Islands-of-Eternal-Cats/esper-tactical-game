@@ -1,14 +1,18 @@
 /**
  * Контракт `character-kit.glb`.
  *
- * По именам мешей код гасит видимость, по именам костей адресуются сокеты —
+ * По именам узлов код гасит видимость, по именам костей адресуются сокеты —
  * значит это контракт, а не деталь ассета. Переименование в Blender иначе
  * ломает рантайм молча, и обнаруживается это на сцене, а не при сборке.
+ *
+ * Кит сжат gltfpack (meshopt): имена мешей он не хранит, меш лежит под
+ * именованным узлом в безымянном дочернем, атрибуты квантованы.
  */
 
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
 
 const GLB = fileURLToPath(new URL('../public/models/character-kit.glb', import.meta.url))
 
@@ -31,7 +35,14 @@ interface Gltf {
     min?: number[]
     max?: number[]
   }[]
-  bufferViews: { byteOffset?: number; byteLength: number; byteStride?: number }[]
+  bufferViews: {
+    byteOffset?: number
+    byteLength: number
+    byteStride?: number
+    extensions?: {
+      EXT_meshopt_compression?: { byteOffset?: number; byteLength: number; byteStride: number; count: number; mode: string; filter?: string }
+    }
+  }[]
   images?: { mimeType?: string }[]
 }
 
@@ -55,18 +66,60 @@ function readGlb(): { json: Gltf; bytes: number; bin: Buffer } {
 
 const { json, bytes, bin } = readGlb()
 
-/** Данные аксессора как Float32Array (только float, только без stride). */
-function floats(accessor: number): Float32Array {
+await MeshoptDecoder.ready
+
+/** Байты bufferView: сжатый meshopt распаковывается тем же декодером, что в рендере. */
+function bytesOf(index: number): Uint8Array {
+  const bv = json.bufferViews[index]
+  if (bv === undefined) throw new Error(`нет bufferView ${index}`)
+  const mo = bv.extensions?.EXT_meshopt_compression
+  if (mo === undefined) {
+    return new Uint8Array(bin.buffer, bin.byteOffset + (bv.byteOffset ?? 0), bv.byteLength)
+  }
+  const source = new Uint8Array(bin.buffer, bin.byteOffset + (mo.byteOffset ?? 0), mo.byteLength)
+  const out = new Uint8Array(mo.count * mo.byteStride)
+  MeshoptDecoder.decodeGltfBuffer(out, mo.count, mo.byteStride, source, mo.mode, mo.filter)
+  return out
+}
+
+/** Данные аксессора числами: нормированные целые — в 0…1, float — как есть. */
+function numbers(accessor: number): number[] {
   const acc = json.accessors[accessor]
   if (acc === undefined) throw new Error(`нет аксессора ${accessor}`)
-  if (acc.componentType !== 5126) throw new Error(`аксессор ${accessor} не float`)
-  const bv = json.bufferViews[acc.bufferView ?? -1]
-  if (bv === undefined || bv.byteStride !== undefined) throw new Error(`аксессор ${accessor}: нет bufferView или есть stride`)
+  if (acc.bufferView === undefined) throw new Error(`аксессор ${accessor}: нет bufferView`)
+  const bv = json.bufferViews[acc.bufferView]!
+  const data = bytesOf(acc.bufferView)
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
   const n = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4 }[acc.type] ?? 0
-  const start = bin.byteOffset + (bv.byteOffset ?? 0) + (acc.byteOffset ?? 0)
-  return new Float32Array(bin.buffer.slice(start, start + acc.count * n * 4))
+  const size = { 5126: 4, 5123: 2, 5121: 1 }[acc.componentType] ?? 0
+  const stride = bv.byteStride ?? bv.extensions?.EXT_meshopt_compression?.byteStride ?? n * size
+  const out: number[] = []
+  for (let i = 0; i < acc.count; i++) {
+    for (let k = 0; k < n; k++) {
+      const at = (acc.byteOffset ?? 0) + i * stride + k * size
+      if (acc.componentType === 5126) out.push(view.getFloat32(at, true))
+      else if (acc.componentType === 5123) out.push(view.getUint16(at, true) / 65535)
+      else out.push(view.getUint8(at) / 255)
+    }
+  }
+  return out
 }
 const index = new Map(json.nodes.map((n, i) => [n.name, i]))
+
+/** Узел с мешем под именем: сам именованный узел или его безымянный потомок. */
+function meshNode(name: string): Gltf['nodes'][number] {
+  const queue = [nodeIndex(name)]
+  for (let head = 0; head < queue.length; head++) {
+    const n = json.nodes[queue[head]!]!
+    if (n.mesh !== undefined) return n
+    for (const c of n.children ?? []) queue.push(c)
+  }
+  throw new Error(`под ${name} нет меша`)
+}
+
+function mesh(name: string): Gltf['meshes'][number] {
+  return json.meshes[meshNode(name).mesh!]!
+}
 
 /** Индекс узла по имени. Отсутствие — это провал контракта, а не undefined. */
 function nodeIndex(name: string): number {
@@ -82,9 +135,7 @@ function node(name: string): Gltf['nodes'][number] {
 }
 
 function triangles(name: string): number {
-  const mesh = json.meshes.find((m) => m.name === name)
-  if (mesh === undefined) throw new Error(`нет меша ${name}`)
-  return mesh.primitives.reduce((sum, p) => {
+  return mesh(name).primitives.reduce((sum, p) => {
     const acc = json.accessors[p.indices]
     if (acc === undefined) throw new Error(`у ${name} нет индексов`)
     return sum + acc.count / 3
@@ -94,14 +145,15 @@ function triangles(name: string): number {
 describe('character-kit.glb', () => {
   it('несёт части под именами из контракта', () => {
     for (const name of ['head_rusty', 'body_stocky', 'gear_vacuum', 'held_vacuum']) {
-      expect(json.meshes.map((m) => m.name)).toContain(name)
+      expect(index.has(name), `нет узла ${name}`).toBe(true)
+      expect(mesh(name)).toBeDefined()
     }
   })
 
   it('скиннингует голову и корпус одним скелетом', () => {
     expect(json.skins).toHaveLength(1)
     for (const name of ['head_rusty', 'body_stocky']) {
-      expect(node(name).skin, `${name} должен быть скиннингован`).toBe(0)
+      expect(meshNode(name).skin, `${name} должен быть скиннингован`).toBe(0)
     }
   })
 
@@ -110,7 +162,7 @@ describe('character-kit.glb', () => {
       ['held_vacuum', 'socket_hand_r'],
       ['gear_vacuum', 'socket_back'],
     ] as const) {
-      expect(node(prop).skin, `${prop} — пропс, скиннинг ему не нужен`).toBeUndefined()
+      expect(meshNode(prop).skin, `${prop} — пропс, скиннинг ему не нужен`).toBeUndefined()
       expect(node(socket).children).toContain(nodeIndex(prop))
     }
   })
@@ -168,10 +220,9 @@ describe('character-kit.glb', () => {
     // двигается. В Blender это не видно, в игре — сразу. Так летали кусок
     // хвоста и бирка на ремне; страховка в скрипте, проверка — здесь.
     for (const name of ['head_rusty', 'body_stocky']) {
-      const mesh = json.meshes.find((m) => m.name === name)
-      const weights = mesh?.primitives[0]?.attributes.WEIGHTS_0
+      const weights = mesh(name).primitives[0]?.attributes.WEIGHTS_0
       expect(weights, `${name} без весов`).toBeDefined()
-      const w = floats(weights!)
+      const w = numbers(weights!)
       let orphans = 0
       for (let i = 0; i < w.length; i += 4) {
         if (w[i]! + w[i + 1]! + w[i + 2]! + w[i + 3]! < 0.01) orphans++
@@ -180,13 +231,12 @@ describe('character-kit.glb', () => {
     }
   })
 
-  it('красит кота картой, цвет вершин — запасной', () => {
-    // Карта Tripo 512² с UV генератора. Цвет вершин в меше лежит на случай,
-    // если картинка не доедет; рантайм гасит его, когда карта есть.
+  it('красит кота картой, без цвета вершин', () => {
+    // Карта Tripo 512² с UV генератора. Цвета вершин в GLB нет: карта в том
+    // же файле, запасной путь не сработал бы никогда, а весил бы 30 КБ.
     for (const name of ['head_rusty', 'body_stocky']) {
-      const mesh = json.meshes.find((m) => m.name === name)
-      expect(mesh?.primitives[0]?.attributes.COLOR_0, `${name} без цвета вершин`).toBeDefined()
-      expect(mesh?.primitives[0]?.attributes.TEXCOORD_0, `${name} без UV`).toBeDefined()
+      expect(mesh(name).primitives[0]?.attributes.COLOR_0, `${name} с лишним цветом вершин`).toBeUndefined()
+      expect(mesh(name).primitives[0]?.attributes.TEXCOORD_0, `${name} без UV`).toBeDefined()
     }
     // Одна карта на кота, по одной на сгенерированный пропс — не больше:
     // каждая лишняя картинка — это и вес, и отдельный вызов рисования.
@@ -202,7 +252,7 @@ describe('character-kit.glb', () => {
     // генерация оправдана, и бюджет выше болваночных 200.
     expect(triangles('held_vacuum')).toBeLessThanOrEqual(900)
     expect(triangles('gear_vacuum')).toBeLessThanOrEqual(1600)
-    // Атлас JPEG 1024² — основная часть веса.
-    expect(bytes / 1024).toBeLessThanOrEqual(1200)
+    // После meshopt: геометрия и веса втрое меньше, карты — как были.
+    expect(bytes / 1024).toBeLessThanOrEqual(400)
   })
 })

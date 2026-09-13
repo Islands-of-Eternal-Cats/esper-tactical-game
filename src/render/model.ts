@@ -13,6 +13,7 @@
 
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { proceduralAsphalt, proceduralConcrete, proceduralWall } from './surface'
@@ -62,6 +63,28 @@ function sanitize(name: string): string {
   return name.replace(/[[\].:/]/g, '')
 }
 
+/**
+ * Безымянный узел: gltfpack хранит имена только у узлов (`-kn`), а мешам
+ * под ними загрузчик даёт служебные `mesh_N`, а общим для нескольких узлов —
+ * ещё и `_instance_N`. Имя из контракта — на ближайшем предке со своим.
+ */
+function unnamed(o: THREE.Object3D): boolean {
+  return o.name === '' || /^(mesh_\d+|_instance_\d+)/.test(o.name)
+}
+
+/**
+ * Киты сжаты meshopt (`scripts/pack-kits.mjs`): геометрия и веса втрое
+ * меньше, декодер — 20 КБ в three. Квантование позиций gltfpack выносит в
+ * трансформацию узла, поэтому геометрию модулей нельзя брать «как есть» —
+ * она запекается при загрузке кита окружения.
+ */
+function loader(): GLTFLoader {
+  const l = new GLTFLoader()
+  l.setMeshoptDecoder(MeshoptDecoder)
+  return l
+}
+
+
 export interface CatRig {
   root: THREE.Object3D
   bones: Map<string, THREE.Bone>
@@ -75,7 +98,7 @@ export class CatKit {
   ) {}
 
   static async load(onProgress?: Progress): Promise<CatKit> {
-    const gltf = await new GLTFLoader().loadAsync(URL_KIT, progress(onProgress))
+    const gltf = await loader().loadAsync(URL_KIT, progress(onProgress))
     return new CatKit(gltf.scene, gltf.animations)
   }
 
@@ -91,15 +114,14 @@ export class CatKit {
 
     root.traverse((o) => {
       if ((o as THREE.Bone).isBone) bones.set(o.name, o as THREE.Bone)
-      // Кит несёт все головы и корпуса сразу; кот показывает свои.
+      // Кит несёт все головы и корпуса сразу; кот показывает свои. Имя
+      // части — на узле, меш под ним безымянный (так раскладывает gltfpack).
       else if (o instanceof THREE.Mesh) {
-        o.visible = wanted.has(o.name)
-        // Цвет вершин в меше — запасной, на случай, если атлас не доехал.
-        // Загрузчик включает его всегда, когда есть COLOR_0, и тогда он
-        // перемножается с текстурой — кот темнеет вдвое.
+        let node: THREE.Object3D = o
+        while (unnamed(node) && node.parent !== null) node = node.parent
+        o.visible = wanted.has(node.name)
         const mat = o.material
         if (mat instanceof THREE.MeshStandardMaterial && mat.map !== null) {
-          mat.vertexColors = false
           // Одежда — оболочка без толщины: воротник капюшона, рукава, полы
           // с некоторых ракурсов видны изнутри, и изнанка без этого чёрная.
           mat.side = THREE.DoubleSide
@@ -176,14 +198,50 @@ export class EnvKit {
   private constructor(private readonly parts: Map<string, EnvPart>) {}
 
   static async load(onProgress?: Progress): Promise<EnvKit> {
-    const gltf = await new GLTFLoader().loadAsync(URL_ENV, progress(onProgress))
+    const gltf = await loader().loadAsync(URL_ENV, progress(onProgress))
+    // Имя модуля — имя ближайшего именованного предка: gltfpack держит
+    // имена узлов, а меши раскладывает под ними безымянными узлами —
+    // по одному на материал, с квантованием в трансформации. Геометрия
+    // запекается относительно именованного узла: рендер инстансирует её
+    // своими матрицами и этих узлов не видит.
     const meshes = new Map<string, THREE.Mesh[]>()
+    const local = new THREE.Matrix4()
+    // Одинаковые меши gltfpack сводит в один, и загрузчик делит геометрию
+    // между узлами: запечь её дважды — значит умножить квантование дважды.
+    // Первому достаётся оригинал, остальным — копии нетронутого.
+    const pristine = new Map<THREE.BufferGeometry, THREE.BufferGeometry>()
     gltf.scene.traverse((o) => {
       if (!(o instanceof THREE.Mesh)) return
-      const base = o.name.replace(/_\d+$/, '')
-      const list = meshes.get(base) ?? []
+      const shared = pristine.get(o.geometry)
+      if (shared !== undefined) o.geometry = shared.clone()
+      else pristine.set(o.geometry, o.geometry.clone())
+      // Квантованные позиции — целые int16; умножить их на матрицу
+      // на месте нельзя, результат не влезет обратно. Переводим в float.
+      const pos = o.geometry.getAttribute('position') as THREE.BufferAttribute
+      if (!(pos.array instanceof Float32Array)) {
+        const f = new Float32Array(pos.count * 3)
+        for (let i = 0; i < pos.count; i++) {
+          f[i * 3] = pos.getX(i)
+          f[i * 3 + 1] = pos.getY(i)
+          f[i * 3 + 2] = pos.getZ(i)
+        }
+        o.geometry.setAttribute('position', new THREE.BufferAttribute(f, 3))
+      }
+      local.identity()
+      let node: THREE.Object3D = o
+      while (node.parent !== null && node.parent !== gltf.scene && unnamed(node)) {
+        node.updateMatrix()
+        local.premultiply(node.matrix)
+        node = node.parent
+      }
+      if (node === o) {
+        o.updateMatrix()
+        local.copy(o.matrix)
+      }
+      o.geometry.applyMatrix4(local)
+      const list = meshes.get(node.name) ?? []
       list.push(o)
-      meshes.set(base, list)
+      meshes.set(node.name, list)
     })
     // Бетон, асфальт и стены — шейдером по мировой координате, не картинкой.
     // Материалы в ките общие, править каждый достаточно один раз.
