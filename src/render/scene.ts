@@ -14,6 +14,8 @@ import { Kit, worldToCell } from './kit'
 import { PALETTE } from './palette'
 
 export interface SceneHandlers {
+  /** Загрузка китов, 0…1: для полоски под занавесом. */
+  onProgress?: (fraction: number) => void
   onIntent: (cell: Cell) => void
   onClearIntent: () => void
 }
@@ -128,15 +130,26 @@ export class SceneView {
     // Киты грузятся в фоне: сцена уже работает на грейбоксе, и падение
     // загрузки не уносит с собой игру. Но показывать грейбокс не надо — до
     // `ready` главный поток держит занавес; капсула остаётся запасным путём.
+    // Одна шкала на оба файла: пока сервер не назвал размер, берётся
+    // ожидаемый — иначе полоска прыгает, когда второй файл отзывается.
+    const expected = [620_000, 290_000]
+    const loaded = [0, 0]
+    const total = [...expected]
+    const report = (i: number) => (got: number, all: number): void => {
+      loaded[i] = got
+      if (all > 0) total[i] = all
+      const sum = (xs: number[]): number => xs.reduce((a, b) => a + b, 0)
+      handlers.onProgress?.(Math.min(1, sum(loaded) / sum(total)))
+    }
     this.ready = Promise.allSettled([
-      CatKit.load().then(
+      CatKit.load(report(0)).then(
         (kit) => {
           this.catKit = kit
           this.cats.setKit(kit)
         },
         (err: unknown) => console.warn('кит персонажей не загрузился, остаёмся на капсуле', err),
       ),
-      EnvKit.load().then(
+      EnvKit.load(report(1)).then(
         (env) => {
           this.envKit = env
           this.kit.setEnv(env)

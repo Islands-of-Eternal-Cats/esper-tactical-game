@@ -19,6 +19,13 @@ import { proceduralAsphalt, proceduralConcrete, proceduralWall } from './surface
 
 const URL_KIT = `${import.meta.env.BASE_URL}models/character-kit.glb`
 
+/** Ход загрузки: байт получено и байт всего (0, пока сервер не сказал). */
+export type Progress = (loaded: number, total: number) => void
+
+function progress(on?: Progress): ((e: ProgressEvent) => void) | undefined {
+  return on === undefined ? undefined : (e) => on(e.loaded, e.lengthComputable ? e.total : 0)
+}
+
 /**
  * three выкидывает из имён зарезервированные символы, среди них двоеточие:
  * `mixamorig:Head` в сцене зовётся `mixamorigHead`. Скелет назван по Mixamo
@@ -41,8 +48,8 @@ export class CatKit {
     private readonly clips: THREE.AnimationClip[],
   ) {}
 
-  static async load(): Promise<CatKit> {
-    const gltf = await new GLTFLoader().loadAsync(URL_KIT)
+  static async load(onProgress?: Progress): Promise<CatKit> {
+    const gltf = await new GLTFLoader().loadAsync(URL_KIT, progress(onProgress))
     return new CatKit(gltf.scene, gltf.animations)
   }
 
@@ -142,8 +149,8 @@ export interface EnvPart {
 export class EnvKit {
   private constructor(private readonly parts: Map<string, EnvPart>) {}
 
-  static async load(): Promise<EnvKit> {
-    const gltf = await new GLTFLoader().loadAsync(URL_ENV)
+  static async load(onProgress?: Progress): Promise<EnvKit> {
+    const gltf = await new GLTFLoader().loadAsync(URL_ENV, progress(onProgress))
     const meshes = new Map<string, THREE.Mesh[]>()
     gltf.scene.traverse((o) => {
       if (!(o instanceof THREE.Mesh)) return

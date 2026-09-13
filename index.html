@@ -33,6 +33,8 @@
       #veil.gone { opacity: 0; pointer-events: none; }
       #veil .brand { font-size: 13px; letter-spacing: .3em; text-transform: uppercase; color: var(--accent); }
       #veil .slice { font-size: 12px; letter-spacing: .12em; color: var(--dim); }
+      #veil .bar { width: 180px; margin-top: 14px; background: #1c2128; }
+      #veil .bar > i { transition: width .12s linear; }
       #vignette {
         position: fixed; inset: 0; pointer-events: none;
         background: radial-gradient(ellipse 72% 68% at 50% 46%, transparent 55%, rgba(6, 8, 11, .62) 100%);
@@ -90,7 +92,11 @@
   <body>
     <canvas id="stage"></canvas>
     <div id="vignette"></div>
-    <div id="veil"><div class="brand">Nine Lives Corp</div><div class="slice">срез «Ржавый»</div></div>
+    <div id="veil">
+      <div class="brand">Nine Lives Corp</div>
+      <div class="slice">срез «Ржавый»</div>
+      <div class="bar"><i></i></div>
+    </div>
     <div id="hud"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>

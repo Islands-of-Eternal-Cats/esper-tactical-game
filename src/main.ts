@@ -14,6 +14,7 @@ const UI_HZ = 12
 const canvas = document.querySelector<HTMLCanvasElement>('#stage')!
 const hudRoot = document.querySelector<HTMLElement>('#hud')!
 const veil = document.querySelector<HTMLElement>('#veil')!
+const veilBar = veil.querySelector<HTMLElement>('.bar > i')!
 
 /** Сид из адреса страницы: ссылка на двор, который стоит показать другому. */
 function seedFromLocation(): number | null {
@@ -80,6 +81,9 @@ worker.onmessage = (e: MessageEvent<WorkerMessage>): void => {
       scene = new SceneView(canvas, world, {
         onIntent: (cell) => send({ t: 'setZone', cell, radius: DEFAULT_ZONE_RADIUS }),
         onClearIntent: () => send({ t: 'clearZone' }),
+        onProgress: (fraction) => {
+          veilBar.style.width = `${Math.round(fraction * 100)}%`
+        },
       })
       // Отладка из консоли браузера: заглянуть в граф сцены. Только в dev.
       if (import.meta.env.DEV) (window as unknown as { __scene: SceneView }).__scene = scene
@@ -89,6 +93,7 @@ worker.onmessage = (e: MessageEvent<WorkerMessage>): void => {
       // поэтому занавес уходит без чёрной вспышки.
       send({ t: 'setSpeed', speed: 0 })
       void scene.ready.then(() => {
+        veilBar.style.width = '100%'
         veil.classList.add('gone')
         send({ t: 'setSpeed', speed })
       })
