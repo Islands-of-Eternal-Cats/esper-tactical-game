@@ -169,6 +169,7 @@ PART = {
 }
 # Мелочь на морде (глаза, усы): 15–20, по 3–5 граней — идёт с головой.
 HEAD_PARTS = {PART["head"], 15, 16, 17, 18, 19, 20}
+CHIN_Z = 1.00
 # Жёсткие детали: вся часть — на одной кости, ей нечего гнуть. Сторона у
 # бедренных подсумков — по знаку X центроида, чтобы не путать лево и право.
 RIGID_PARTS = {
@@ -280,8 +281,11 @@ def split_head(obj):
     bpy.ops.object.mode_set(mode="EDIT")
     bpy.ops.mesh.select_all(action="DESELECT")
     bpy.ops.object.mode_set(mode="OBJECT")
+    # Ниже подбородка — корпус, даже если сегментация отдала это голове:
+    # шов у неё нерегулярный, и снизу головы висели три несимметричных
+    # клина нагрудника. Подбородок по центру морды — CHIN_Z.
     for poly, part in zip(obj.data.polygons, part_of_faces(obj)):
-        poly.select = part in HEAD_PARTS
+        poly.select = part in HEAD_PARTS and poly.center.z >= CHIN_Z
     bpy.ops.object.mode_set(mode="EDIT")
     bpy.ops.mesh.separate(type="SELECTED")
     bpy.ops.object.mode_set(mode="OBJECT")
