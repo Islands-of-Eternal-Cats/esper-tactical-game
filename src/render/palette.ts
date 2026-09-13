@@ -21,6 +21,8 @@ export const PALETTE = {
   grid: 0x373e49,
   wall: 0x4a5461,
   wallGhostEdge: 0x93a4ba,
+  /** Обводка рёбер: почти чёрная, темнее самой тёмной грани. */
+  outline: 0x0a0c0f,
   wallTop: 0x49525f,
   container: 0x35505c,
   pile: 0x6b6357,

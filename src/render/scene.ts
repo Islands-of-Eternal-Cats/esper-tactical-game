@@ -249,6 +249,7 @@ export class SceneView {
   /** `dt` — реальное время кадра в секундах, умноженное на скорость. */
   render(snap: Snapshot | null, dt: number): void {
     if (this.contextLost) return
+    this.kit.flicker(dt)
     if (snap !== null) {
       this.kit.sync(snap)
       this.cats.sync(snap, dt)

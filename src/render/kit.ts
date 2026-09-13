@@ -40,6 +40,8 @@ const OCCLUDERS: ReadonlyArray<readonly [number, number]> = [
 ]
 
 const AXIS_Y = new THREE.Vector3(0, 1, 0)
+/** Матрица нулевого масштаба: инстанс на месте, но его не видно. */
+const HIDDEN = new THREE.Matrix4().makeScale(0, 0, 0)
 const AXIS_Z = new THREE.Vector3(0, 0, 1)
 
 /** Ламп во дворе: тёплых пятен должно быть мало, иначе нуар кончается. */
@@ -134,6 +136,17 @@ function buildShell(cells: readonly Cell[], world: WorldView): THREE.BufferGeome
   return geometry
 }
 
+/** Копия геометрии, сдвинутая по нормалям на `d`: для линий поверх граней. */
+function inflate(geometry: THREE.BufferGeometry, d: number): THREE.BufferGeometry {
+  const out = geometry.clone()
+  const p = out.getAttribute('position') as THREE.BufferAttribute
+  const n = out.getAttribute('normal') as THREE.BufferAttribute
+  for (let i = 0; i < p.count; i++) {
+    p.setXYZ(i, p.getX(i) + n.getX(i) * d, p.getY(i) + n.getY(i) * d, p.getZ(i) + n.getZ(i) * d)
+  }
+  return out
+}
+
 /**
  * Освобождает поддерево. Материалы собираются в множество: они общие между
  * объектами, и освобождать их в обходе как попало значит освободить дважды.
@@ -172,9 +185,14 @@ export class Kit {
   /** Грейбокс реквизита на полу: коробки на занятых клетках до кита. */
   private readonly propBoxes: THREE.InstancedMesh
   private readonly lamps: THREE.PointLight[] = []
+  private time = 0
   private readonly blocks: Cell[][]
   /** Оболочка на блок: показывается вместо его кубов, когда блок гаснет. */
   private readonly ghostShells: THREE.Mesh[] = []
+  /** Обводка сплошного блока — с китом; гаснет вместе с ним. */
+  private readonly outlines: THREE.LineSegments[] = []
+  /** Пропсы на крыше по блокам: гаснут вместе с ним, иначе висят над контуром. */
+  private readonly blockProps: { mesh: THREE.InstancedMesh; index: number; matrix: THREE.Matrix4 }[][] = []
   private ghostSignature = -1
 
   /**
@@ -268,6 +286,11 @@ export class Kit {
       opacity: 0.5,
       depthWrite: false,
     })
+    const outlineMaterial = new THREE.LineBasicMaterial({
+      color: PALETTE.outline,
+      transparent: true,
+      opacity: 0.75,
+    })
     for (const cells of blocks) {
       const geometry = buildShell(cells, world)
       const shell = new THREE.Mesh(geometry, ghostMaterial)
@@ -283,6 +306,15 @@ export class Kit {
       const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geometry), edgeMaterial)
       edges.renderOrder = 3
       shell.add(edges)
+
+      // Тёмная обводка сплошного блока: на плоской заливке ребро между
+      // гранью в свету и гранью в тени и так видно, а между двумя гранями
+      // в тени — нет, и блок сливается с полом. Линии лежат на поверхности,
+      // поэтому геометрия сдвинута по нормалям — иначе мерцание в z-буфере.
+      const outline = new THREE.LineSegments(new THREE.EdgesGeometry(inflate(geometry, 0.012)), outlineMaterial)
+      outline.visible = false
+      this.outlines.push(outline)
+      this.root.add(outline)
 
       this.ghostShells.push(shell)
       this.root.add(shell)
@@ -344,6 +376,22 @@ export class Kit {
     }
 
     scene.add(this.root)
+  }
+
+  /**
+   * Лампы чуть дышат: сумма двух медленных синусов и редкий провал. Не
+   * мигание — старая лампа под нестабильной сетью. Время своё, от кадра:
+   * это картинка, симуляция о лампах не знает.
+   */
+  flicker(dt: number): void {
+    this.time += dt
+    this.lamps.forEach((lamp, i) => {
+      const t = this.time + i * 1.7
+      let k = 1 + 0.05 * Math.sin(t * 7.3) + 0.04 * Math.sin(t * 2.1 + 1)
+      // Провал раз в несколько секунд, на долю секунды.
+      if (Math.sin(t * 0.61 + i) > 0.985) k *= 0.55
+      lamp.intensity = (lamp.userData.base as number) * k
+    })
   }
 
   sync(snap: Snapshot): void {
@@ -424,6 +472,8 @@ export class Kit {
 
     this.ghostShells.forEach((shell, block) => {
       shell.visible = ghost.has(block)
+      if (this.floors.length > 0) this.outlines[block]!.visible = !ghost.has(block)
+      this.showBlockProps(block, !ghost.has(block))
     })
   }
 
@@ -487,6 +537,10 @@ export class Kit {
     })
     this.grid.visible = false
     this.slab.position.y -= FLOOR_H
+    // Обводка — часть художественного прохода, грейбокс живёт без неё.
+    this.ghostShells.forEach((shell, block) => {
+      this.outlines[block]!.visible = !shell.visible
+    })
 
     this.dressEdge(env)
 
@@ -639,6 +693,7 @@ export class Kit {
     put('edge_curb', xR, zF, 0)
 
     const gateLight = new THREE.PointLight(PALETTE.lamp, 7, 8, 2)
+    gateLight.userData.base = gateLight.intensity
     gateLight.position.set(-width / 2 + 0.5 + GATE_AT + 0.5, STREET_Y + 1.95, zN + 0.35)
     this.lamps.push(gateLight)
     this.root.add(gateLight)
@@ -671,17 +726,25 @@ export class Kit {
     type Kind = (typeof kinds)[number]
     const matrices = new Map<Kind, THREE.Matrix4[]>()
     for (const kind of kinds) matrices.set(kind, [])
+    // Кому принадлежит инстанс: номер блока на каждую матрицу, по видам.
+    const owners = new Map<Kind, number[]>()
+    for (const kind of kinds) owners.set(kind, [])
+    let block = 0
+    const add = (kind: Kind): void => {
+      matrices.get(kind)!.push(this.m.compose(this.pos, this.q, this.scl).clone())
+      owners.get(kind)!.push(block)
+    }
     const put = (kind: Kind, x: number, y: number, z: number, yaw = 0, scale = 1): void => {
       this.pos.set(x, y, z)
       this.q.setFromAxisAngle(AXIS_Y, yaw)
       this.scl.setScalar(scale)
-      matrices.get(kind)!.push(this.m.compose(this.pos, this.q, this.scl).clone())
+      add(kind)
     }
     /** Труба длиной `length` из точки вдоль +X, повёрнутая кватернионом. */
     const pipe = (x: number, y: number, z: number, length: number): void => {
       this.pos.set(x, y, z)
       this.scl.set(length, 1, 1)
-      matrices.get('prop_pipe')!.push(this.m.compose(this.pos, this.q, this.scl).clone())
+      add('prop_pipe')
     }
 
     // Лампы достаются блокам с наибольшим хешем: двум, не всем.
@@ -693,6 +756,8 @@ export class Kit {
     const min = new THREE.Vector3()
     const max = new THREE.Vector3()
     this.blocks.forEach((cells, b) => {
+      block = b
+      this.blockProps.push([])
       const id = `block${b}`
       cellToWorld(cells[0]!, this.world, min)
       max.copy(min)
@@ -750,6 +815,7 @@ export class Kit {
         put('prop_lamp_wall', x, LAMP_H, z, yawFacing(dx, dz))
         // Свет — из-под плафона, на длину вылета кронштейна.
         const light = new THREE.PointLight(PALETTE.lamp, 9, 8, 2)
+        light.userData.base = light.intensity
         light.position.set(x + dx * 0.42, LAMP_H - 0.15, z + dz * 0.42)
         this.lamps.push(light)
         this.root.add(light)
@@ -760,13 +826,25 @@ export class Kit {
       const list = matrices.get(kind)!
       const { geometry, material } = env.part(kind)
       const mesh = new THREE.InstancedMesh(geometry, material, Math.max(1, list.length))
-      list.forEach((m, i) => mesh.setMatrixAt(i, m))
+      list.forEach((m, i) => {
+        mesh.setMatrixAt(i, m)
+        this.blockProps[owners.get(kind)![i]!]!.push({ mesh, index: i, matrix: m })
+      })
       mesh.count = list.length
       mesh.instanceMatrix.needsUpdate = true
       mesh.castShadow = true
       this.root.add(mesh)
       return mesh
     }))
+    this.ghostShells.forEach((shell, b) => this.showBlockProps(b, !shell.visible))
+  }
+
+  /** Пропсы блока: показать или сжать в точку — инстанс не спрятать иначе. */
+  private showBlockProps(block: number, shown: boolean): void {
+    for (const { mesh, index, matrix } of this.blockProps[block] ?? []) {
+      mesh.setMatrixAt(index, shown ? matrix : HIDDEN)
+      mesh.instanceMatrix.needsUpdate = true
+    }
   }
 
   private syncPiles(piles: readonly PileView[]): void {
