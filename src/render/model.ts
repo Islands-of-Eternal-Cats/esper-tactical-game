@@ -63,7 +63,12 @@ export class CatKit {
         // Загрузчик включает его всегда, когда есть COLOR_0, и тогда он
         // перемножается с текстурой — кот темнеет вдвое.
         const mat = o.material
-        if (mat instanceof THREE.MeshStandardMaterial && mat.map !== null) mat.vertexColors = false
+        if (mat instanceof THREE.MeshStandardMaterial && mat.map !== null) {
+          mat.vertexColors = false
+          // Одежда — оболочка без толщины: воротник капюшона, рукава, полы
+          // с некоторых ракурсов видны изнутри, и изнанка без этого чёрная.
+          mat.side = THREE.DoubleSide
+        }
       }
     })
 
