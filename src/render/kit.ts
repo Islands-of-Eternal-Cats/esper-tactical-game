@@ -871,7 +871,9 @@ export class Kit {
         this.blockProps[block]!.push({ mesh, index: i, matrix: m })
         let edges = edgeCache.get(kind)
         if (edges === undefined) {
-          edges = new THREE.EdgesGeometry(geometry, 40)
+          // Порог ниже угла граней десятигранного стакана (36°): иначе
+          // от вентиляции остаются одни кольца крышек.
+          edges = new THREE.EdgesGeometry(geometry, 30)
           edgeCache.set(kind, edges)
         }
         edgesByBlock[block]!.push(edges.clone().applyMatrix4(m))
