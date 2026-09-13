@@ -21,6 +21,25 @@ export interface SceneHandlers {
 /** Смещение курсора, после которого жест считается панорамой, а не кликом. */
 const DRAG_SLOP = 4
 
+/**
+ * Фон — вертикальный градиент: сверху холодное «небо», внизу графит тумана.
+ * Плоская заливка одним цветом читалась как незакрашенный вьюпорт.
+ */
+function skyGradient(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas')
+  canvas.width = 1
+  canvas.height = 128
+  const ctx = canvas.getContext('2d')!
+  const g = ctx.createLinearGradient(0, 0, 0, canvas.height)
+  g.addColorStop(0, `#${PALETTE.sky.toString(16).padStart(6, '0')}`)
+  g.addColorStop(1, `#${PALETTE.background.toString(16).padStart(6, '0')}`)
+  ctx.fillStyle = g
+  ctx.fillRect(0, 0, canvas.width, canvas.height)
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.colorSpace = THREE.SRGBColorSpace
+  return texture
+}
+
 export class SceneView {
   private readonly renderer: THREE.WebGLRenderer
   /** Публично только ради отладки из консоли (см. main.ts). */
@@ -50,7 +69,11 @@ export class SceneView {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true })
     // Выше двух гнать нечего: плоская заливка от этого не выигрывает.
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
-    this.scene.background = new THREE.Color(PALETTE.background)
+    this.scene.background = skyGradient()
+    // Туман съедает улицу за оградой в цвет фона: двор — освещённый
+    // островок, за ним ничего разглядывать не надо. Дальность от камеры
+    // (60) с запасом на весь двор: сам двор туман не трогает.
+    this.scene.fog = new THREE.Fog(PALETTE.background, 64, 96)
 
     // Теней нет: при плоской заливке форма читается затенением по нормали.
     this.scene.add(new THREE.HemisphereLight(0x9fb4cc, 0x20242c, 1.6))

@@ -18,6 +18,10 @@ const MAX_PILES = 64
 const WALL_H = 1.3
 /** Толщина плитки пола: с китом верх плитки — уровень земли симуляции. */
 const FLOOR_H = 0.05
+/** Улица под плитой: ниже дна юбки. */
+const STREET_Y = -0.56
+/** Толщина панели ограды и парапета. */
+const EDGE_T = 0.3
 
 /**
  * Клетки, стена в которых загораживает точку интереса.
@@ -459,6 +463,8 @@ export class Kit {
     this.grid.visible = false
     this.slab.position.y -= FLOOR_H
 
+    this.dressEdge(env)
+
     const wall = env.part('wall_block')
     this.wallsSolid.geometry.dispose()
     ;(this.wallsSolid.material as THREE.Material).dispose()
@@ -472,6 +478,56 @@ export class Kit {
     this.container.material = dumpster.material
 
     this.dressBlocks(env)
+  }
+
+  /**
+   * Улица и ограда вокруг плиты.
+   *
+   * Улица — плоскость под плитой до тумана: двор стоит на земле, а не висит
+   * в пустоте. По дальним сторонам (−X, −Z) — бетонная ограда в рост: камера
+   * смотрит от +X+Z, и там она ничего не загораживает, только замыкает двор.
+   * По ближним — низкий парапет, с разрывом у угла контейнера: туда выезжают.
+   */
+  private dressEdge(env: EnvKit): void {
+    const { width, height } = this.world
+    const street = new THREE.Mesh(
+      new THREE.PlaneGeometry(160, 160),
+      new THREE.MeshLambertMaterial({ color: PALETTE.street }),
+    )
+    street.rotation.x = -Math.PI / 2
+    street.position.y = STREET_Y
+    this.root.add(street)
+
+    const walls: THREE.Matrix4[] = []
+    const curbs: THREE.Matrix4[] = []
+    const put = (into: THREE.Matrix4[], x: number, z: number, yaw: number): void => {
+      this.pos.set(x, STREET_Y, z)
+      this.q.setFromAxisAngle(AXIS_Y, yaw)
+      this.scl.setScalar(1)
+      into.push(this.m.compose(this.pos, this.q, this.scl).clone())
+    }
+    // Ограда стоит вплотную за юбкой плиты, по её внешнему краю.
+    const off = 0.3 + EDGE_T / 2
+    const xL = -width / 2 - off
+    const xR = width / 2 + off
+    const zN = -height / 2 - off
+    const zF = height / 2 + off
+    // Панели от угла до угла, угловая — с дальней стороны, чтобы стык закрыть.
+    for (let i = -1; i <= width; i++) put(walls, -width / 2 + 0.5 + i, zN, 0)
+    for (let i = 0; i < height; i++) put(walls, xL, -height / 2 + 0.5 + i, Math.PI / 2)
+    // Парапет по ближним сторонам, разрыв в две клетки у угла контейнера.
+    for (let i = 0; i < width - 2; i++) put(curbs, -width / 2 + 0.5 + i, zF, 0)
+    for (let i = 0; i < height - 2; i++) put(curbs, xR, -height / 2 + 0.5 + i, Math.PI / 2)
+    put(curbs, xR, zF, 0)
+
+    for (const [name, list] of [['edge_wall', walls], ['edge_curb', curbs]] as const) {
+      const { geometry, material } = env.part(name)
+      const mesh = new THREE.InstancedMesh(geometry, material, list.length)
+      list.forEach((m, i) => mesh.setMatrixAt(i, m))
+      mesh.instanceMatrix.needsUpdate = true
+      this.root.add(mesh)
+      this.props.push(mesh)
+    }
   }
 
   /**
@@ -573,7 +629,7 @@ export class Kit {
       }
     })
 
-    this.props = kinds.map((kind) => {
+    this.props.push(...kinds.map((kind) => {
       const list = matrices.get(kind)!
       const { geometry, material } = env.part(kind)
       const mesh = new THREE.InstancedMesh(geometry, material, Math.max(1, list.length))
@@ -582,7 +638,7 @@ export class Kit {
       mesh.instanceMatrix.needsUpdate = true
       this.root.add(mesh)
       return mesh
-    })
+    }))
   }
 
   private syncPiles(piles: readonly PileView[]): void {

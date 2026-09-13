@@ -49,7 +49,7 @@ describe('env-kit.glb', () => {
 
   it('несёт модули двора без текстур: плоские материалы, бюджет 50–300 тр.', () => {
     const modules = [
-      'floor_slab', 'floor_patch', 'floor_grate', 'wall_block',
+      'floor_slab', 'floor_patch', 'floor_grate', 'wall_block', 'edge_wall', 'edge_curb',
       'prop_dumpster', 'prop_lamp_wall', 'prop_vent', 'prop_ac', 'prop_pipe', 'prop_pipe_joint',
     ]
     for (const name of modules) {

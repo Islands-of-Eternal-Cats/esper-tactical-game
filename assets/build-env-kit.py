@@ -222,6 +222,19 @@ def wall_block():
     return box("wall_block", (1.0, 1.0, WALL_H), bevel=0.04, colour="wall")
 
 
+def edge_wall():
+    """Панель ограды двора в метр: бетон в рост с карнизом. Стоит на улице
+    за плитой по дальним сторонам — на пути камеры её нет никогда."""
+    panel = box("a", (1.0, 0.3, 2.2), bevel=0.04, colour="wall")
+    cap = box("b", (1.0, 0.38, 0.1), at=(0, 0, 2.2), bevel=0.02, colour="concrete_dark")
+    return join("edge_wall", [panel, cap])
+
+
+def edge_curb():
+    """Парапет в метр по ближним сторонам: низкий, чтобы не загораживать."""
+    return box("edge_curb", (1.0, 0.3, 0.35), bevel=0.03)
+
+
 def prop_dumpster():
     """Контейнер: корпус, крышка, ручки, колёса. Занимает свою клетку с запасом."""
     body = box("a", (1.4, 1.1, 0.86), at=(0, 0, 0.12), bevel=0.04, colour="dumpster")
@@ -280,7 +293,7 @@ def prop_pipe_joint():
 
 
 MODULES = [
-    floor_slab, floor_patch, floor_grate, wall_block,
+    floor_slab, floor_patch, floor_grate, wall_block, edge_wall, edge_curb,
     prop_dumpster, prop_lamp_wall, prop_vent, prop_ac, prop_pipe, prop_pipe_joint,
 ]
 

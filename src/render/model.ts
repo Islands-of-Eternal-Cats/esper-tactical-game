@@ -103,6 +103,8 @@ export const FLOORS = ['floor_slab', 'floor_patch', 'floor_grate'] as const
 export const MODULES = [
   ...FLOORS,
   'wall_block',
+  'edge_wall',
+  'edge_curb',
   'prop_dumpster',
   'prop_lamp_wall',
   'prop_vent',
