@@ -27,6 +27,9 @@ const RUSTY_PARTS = ['head_rusty', 'body_stocky', 'gear_vacuum', 'held_vacuum'] 
  * автотестом `tests/character-kit.test.ts`; отсутствие клипа — поломка кита.
  */
 const ACTIONS: readonly CatView['action'][] = ['idle', 'walk', 'haul', 'work', 'dump']
+/** Отступ от контейнера на разгрузке, м, и время подхода/отхода, с. */
+const STANDOFF = 0.32
+const STANDOFF_S = 0.35
 
 /** Направление взгляда в плоскости земли. y растёт на юг. */
 const HEADING: Record<Dir, [number, number]> = {
@@ -355,6 +358,8 @@ interface CatObject {
   figure: Figure
   yaw: number
   headYaw: number
+  /** Отступ от контейнера на разгрузке, 0…1 от STANDOFF; подходит плавно. */
+  standoff: number
 }
 
 export class Cats {
@@ -423,7 +428,7 @@ export class Cats {
     for (const view of snap.cats) {
       let obj = this.objects.get(view.id)
       if (obj === undefined) {
-        obj = { figure: this.build(), yaw: 0, headYaw: 0 }
+        obj = { figure: this.build(), yaw: 0, headYaw: 0, standoff: 0 }
         this.objects.set(view.id, obj)
         this.root.add(obj.figure.root)
       }
@@ -463,12 +468,33 @@ export class Cats {
     // клетку ложится на неё. Симуляция об этом не знает и знать не должна.
     const n = this.routePoints(view)
     smoothAlong(this.route, n, 1 + s, this.a)
+
+    // На разгрузке кот стоит в соседней с контейнером клетке, а контейнер
+    // шире клетки и разгрузка — взмах вперёд: без отступа рука входит в
+    // бак. Кот отходит на STANDOFF от центра клетки прочь от контейнера и
+    // разворачивается к нему корпусом, а не только головой.
+    const dumping = view.action === 'dump' && view.lookAt !== null
+    obj.standoff = Math.min(1, Math.max(0, obj.standoff + (dumping ? dt : -dt) / STANDOFF_S))
+    let faceTarget: number | null = null
+    if (view.lookAt !== null && (dumping || obj.standoff > 0)) {
+      const t = cellToWorld(view.lookAt, this.world, this.b)
+      const dx = t.x - this.a.x
+      const dz = t.z - this.a.z
+      const d = Math.hypot(dx, dz)
+      if (d > 1e-3) {
+        this.a.x -= (dx / d) * STANDOFF * obj.standoff
+        this.a.z -= (dz / d) * STANDOFF * obj.standoff
+        if (dumping) faceTarget = Math.atan2(dx, dz)
+      }
+    }
     obj.figure.root.position.set(this.a.x, 0, this.a.z)
 
     // Корпус — по касательной к сглаженной кривой, пока кот идёт; иначе на
     // повороте лесенки он бы дёргался между восемью направлениями.
     let yawTarget: number
-    if (speed > 0 && n >= 3) {
+    if (faceTarget !== null) {
+      yawTarget = faceTarget
+    } else if (speed > 0 && n >= 3) {
       smoothAlong(this.route, n, 1 + s + 0.25, this.b)
       smoothAlong(this.route, n, 1 + s - 0.25, this.c)
       yawTarget = Math.atan2(this.b.x - this.c.x, this.b.z - this.c.z)

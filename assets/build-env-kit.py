@@ -379,14 +379,15 @@ def edge_curb():
 
 
 def prop_dumpster():
-    """Контейнер: корпус, крышка, ручки, колёса. Занимает свою клетку с запасом."""
-    body = box("a", (1.4, 1.1, 0.86), at=(0, 0, 0.12), bevel=0.04, colour="dumpster")
-    lid = box("b", (1.46, 1.16, 0.1), at=(0, 0, 0.98), bevel=0.03, colour="dumpster")
+    """Контейнер: корпус, крышка, ручки, колёса. В своей клетке, с полем:
+    кот разгружается из соседней, и бак не должен в неё нависать."""
+    body = box("a", (1.1, 0.96, 0.86), at=(0, 0, 0.12), bevel=0.04, colour="dumpster")
+    lid = box("b", (1.14, 1.0, 0.1), at=(0, 0, 0.98), bevel=0.03, colour="dumpster")
     parts = [body, lid]
     for sx in (-1, 1):
-        parts.append(box("c", (0.08, 0.5, 0.06), at=(sx * 0.74, 0, 0.6), colour="steel"))
+        parts.append(box("c", (0.08, 0.5, 0.06), at=(sx * 0.59, 0, 0.6), colour="steel"))
         for sy in (-1, 1):
-            parts.append(cylinder("d", 0.08, 0.06, at=(sx * 0.55, sy * 0.4, 0.08), axis="Y", verts=8, colour="rubber", bottom=False))
+            parts.append(cylinder("d", 0.08, 0.06, at=(sx * 0.4, sy * 0.35, 0.08), axis="Y", verts=8, colour="rubber", bottom=False))
     return join("prop_dumpster", parts)
 
 
