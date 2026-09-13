@@ -99,10 +99,13 @@ export const DEBRIS = ['debris_bag', 'debris_barrel', 'debris_crate'] as const
 /** Плитки пола: по клетке на каждую, вариант выбирается хешем клетки. */
 export const FLOORS = ['floor_slab', 'floor_patch', 'floor_grate'] as const
 
+/** Панели стен: три положения одного тайла и две с деталью. По хешу клетки. */
+export const WALL_BLOCKS = ['wall_block', 'wall_block_b', 'wall_block_c', 'wall_block_grille', 'wall_block_plate'] as const
+
 /** Модули двора, которые рендер ставит по раскладке. Имена — контракт. */
 export const MODULES = [
   ...FLOORS,
-  'wall_block',
+  ...WALL_BLOCKS,
   'edge_wall',
   'edge_corrugated',
   'edge_gate',

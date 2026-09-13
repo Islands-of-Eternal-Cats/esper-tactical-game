@@ -8,7 +8,7 @@
 import * as THREE from 'three'
 import type { Cell, CatView, PileView, PropKind, Snapshot, WorldView } from '../shared/protocol'
 import { PALETTE } from './palette'
-import { DEBRIS, FLOORS, type EnvKit } from './model'
+import { DEBRIS, FLOORS, WALL_BLOCKS, type EnvKit } from './model'
 
 /** Обломков на кучу. Куча тает, теряя их по одному. */
 const CHUNKS = 8
@@ -173,7 +173,10 @@ export class Kit {
   private readonly wallIndexByCell = new Map<number, number>()
   /** Номер сплошного блока для каждой стенной клетки. Гаснет блок целиком. */
   private readonly wallBlockOf: number[] = []
-  private readonly wallsSolid: THREE.InstancedMesh
+  /** Сплошные стены по варианту панели; в грейбоксе вариант один — куб. */
+  private wallsSolid: THREE.InstancedMesh[]
+  /** Вариант панели на каждую стенную клетку: с китом — от хеша клетки. */
+  private wallKindOf: number[]
   /** Грейбокс, который кит вытесняет: плита, разметка, куб контейнера. */
   private readonly slab: THREE.Mesh
   private readonly grid: THREE.LineSegments
@@ -264,14 +267,16 @@ export class Kit {
     const blocks = this.groupWallsIntoBlocks(world)
     this.blocks = blocks
 
-    this.wallsSolid = new THREE.InstancedMesh(
+    const wallsBox = new THREE.InstancedMesh(
       wallGeo,
       new THREE.MeshLambertMaterial({ color: PALETTE.wall }),
       Math.max(1, world.walls.length),
     )
-    this.wallsSolid.castShadow = true
-    this.wallsSolid.receiveShadow = true
-    this.root.add(this.wallsSolid)
+    wallsBox.castShadow = true
+    wallsBox.receiveShadow = true
+    this.root.add(wallsBox)
+    this.wallsSolid = [wallsBox]
+    this.wallKindOf = world.walls.map(() => 0)
 
     const ghostMaterial = new THREE.MeshLambertMaterial({
       color: PALETTE.wall,
@@ -462,18 +467,26 @@ export class Kit {
     if (signature === this.ghostSignature) return
     this.ghostSignature = signature
 
-    let solid = 0
-    for (let i = 0; i < this.wallMatrices.length; i++) {
-      if (ghost.has(this.wallBlockOf[i]!)) continue
-      this.wallsSolid.setMatrixAt(solid++, this.wallMatrices[i]!)
-    }
-    this.wallsSolid.count = solid
-    this.wallsSolid.instanceMatrix.needsUpdate = true
+    this.packWalls(ghost)
 
     this.ghostShells.forEach((shell, block) => {
       shell.visible = ghost.has(block)
       if (this.floors.length > 0) this.outlines[block]!.visible = !ghost.has(block)
       this.showBlockProps(block, !ghost.has(block))
+    })
+  }
+
+  /** Раскладывает видимые стены по инстансерам вариантов. */
+  private packWalls(ghost: ReadonlySet<number>): void {
+    const counts = this.wallsSolid.map(() => 0)
+    for (let i = 0; i < this.wallMatrices.length; i++) {
+      if (ghost.has(this.wallBlockOf[i]!)) continue
+      const k = this.wallKindOf[i]!
+      this.wallsSolid[k]!.setMatrixAt(counts[k]!++, this.wallMatrices[i]!)
+    }
+    this.wallsSolid.forEach((mesh, k) => {
+      mesh.count = counts[k]!
+      mesh.instanceMatrix.needsUpdate = true
     })
   }
 
@@ -544,11 +557,27 @@ export class Kit {
 
     this.dressEdge(env)
 
-    const wall = env.part('wall_block')
-    this.wallsSolid.geometry.dispose()
-    ;(this.wallsSolid.material as THREE.Material).dispose()
-    this.wallsSolid.geometry = wall.geometry
-    this.wallsSolid.material = wall.material
+    // Стены — панели пяти вариантов: три с тем же тайлом в разных
+    // положениях и две с деталью. Одна панель на всех читалась обоями.
+    for (const mesh of this.wallsSolid) {
+      this.root.remove(mesh)
+      mesh.geometry.dispose()
+      ;(mesh.material as THREE.Material).dispose()
+    }
+    this.wallsSolid = WALL_BLOCKS.map((name) => {
+      const { geometry, material } = env.part(name)
+      const mesh = new THREE.InstancedMesh(geometry, material, Math.max(1, this.wallMatrices.length))
+      mesh.castShadow = true
+      mesh.receiveShadow = true
+      this.root.add(mesh)
+      return mesh
+    })
+    this.wallKindOf = this.world.walls.map((cell) => {
+      const r = hash01(`wall${cell.x}:${cell.y}`, 3)
+      // Деталей мало: решётка и пластина — по одной на блок-другой.
+      return r < 0.06 ? 3 : r < 0.12 ? 4 : Math.floor(r * 40) % 3
+    })
+    this.ghostSignature = -1
 
     const dumpster = env.part('prop_dumpster')
     this.container.geometry.dispose()
@@ -911,7 +940,7 @@ export class Kit {
     if (this.piles.length > 1) for (const mesh of this.piles) this.root.remove(mesh)
     for (const mesh of [...this.floors, ...this.props]) this.root.remove(mesh)
     if (this.floors.length > 0) {
-      this.root.remove(this.wallsSolid)
+      for (const mesh of this.wallsSolid) this.root.remove(mesh)
       this.root.remove(this.container)
     }
     disposeTree(this.root)

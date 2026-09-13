@@ -253,19 +253,77 @@ def street_tile():
     return obj
 
 
-def wall_block():
+def joint_faces(obj, colour="concrete_dark"):
+    """Фаски — тёмные канавки стыка: светлые, они ловили ключевой свет и
+    рисовали по блоку яркие полосы между панелями."""
+    obj.data.materials.append(material(colour))
+    idx = len(obj.data.materials) - 1
+    for poly in obj.data.polygons:
+        n = poly.normal
+        if max(abs(n.x), abs(n.y), abs(n.z)) < 0.9:
+            poly.material_index = idx
+
+
+def shift_uv(obj, du, dv, mirror=False):
+    """Тот же тайл, другой кусок: сдвиг и зеркало развёртки. Панели рядом
+    с одной и той же картинкой в одном положении читались обоями."""
+    uv = obj.data.uv_layers.active.data
+    for loop in uv:
+        u, v = loop.uv
+        if mirror:
+            u = 1.0 - u
+        loop.uv = (u + du, v + dv)
+
+
+def wall_panel(name, du=0.0, dv=0.0, mirror=False):
     """Стенной блок в клетку. Фаска — стык панелей, из клеток растёт блок.
 
     Верх — крыша под тем же асфальтом, что улица: одна и та же текстура
     на стене и на крыше сливала блок в один тон с полом, и объём пропадал."""
-    obj = box("wall_block", (1.0, 1.0, WALL_H), bevel=0.04, colour="wall")
+    obj = box(name, (1.0, 1.0, WALL_H), bevel=0.04, colour="wall")
     obj.data.materials.append(material("asphalt"))
-    # Фаска верхнего ребра — тоже крыша: светлая, она ловила ключевой свет
-    # и рисовала по блоку белую решётку из стыков клеток.
     for poly in obj.data.polygons:
         if poly.normal.z > 0.5:
             poly.material_index = 1
+    joint_faces(obj)
+    shift_uv(obj, du, dv, mirror)
     return obj
+
+
+def wall_block():
+    return wall_panel("wall_block")
+
+
+def wall_block_b():
+    return wall_panel("wall_block_b", 0.5, 0.25, mirror=True)
+
+
+def wall_block_c():
+    return wall_panel("wall_block_c", 0.25, 0.6)
+
+
+def wall_block_grille():
+    """Панель с вентиляционной решёткой: рамка и жалюзи на грани +X."""
+    panel = wall_panel("a", 0.7, 0.1, mirror=True)
+    frame = box("b", (0.05, 0.5, 0.36), at=(0.5, 0, 0.55), colour="steel_dark")
+    parts = [panel, frame]
+    for i in range(5):
+        parts.append(box("c", (0.04, 0.42, 0.035), at=(0.53, 0, 0.6 + i * 0.06), colour="steel"))
+    return join("wall_block_grille", parts)
+
+
+def wall_block_plate():
+    """Панель с заклёпанной стальной пластиной на грани −Y (к камере)."""
+    panel = wall_panel("a", 0.15, 0.45)
+    plate = box("b", (0.62, 0.03, 0.48), at=(0.05, -0.5, 0.5), bevel=0.008, colour="steel_dark")
+    parts = [panel, plate]
+    for sx in (-1, 1):
+        for sz in (0.55, 0.93):
+            parts.append(cylinder("c", 0.025, 0.02, at=(0.05 + sx * 0.27, -0.515, sz), axis="Y", verts=6, colour="steel", bottom=False))
+    return join("wall_block_plate", parts)
+
+
+WALL_BLOCKS = ["wall_block", "wall_block_b", "wall_block_c", "wall_block_grille", "wall_block_plate"]
 
 
 def edge_wall():
@@ -425,7 +483,9 @@ def prop_pipe_joint():
 
 
 MODULES = [
-    floor_slab, floor_patch, floor_grate, wall_block, edge_wall, edge_corrugated, edge_gate, edge_door, edge_curb, street_tile,
+    floor_slab, floor_patch, floor_grate,
+    wall_block, wall_block_b, wall_block_c, wall_block_grille, wall_block_plate,
+    edge_wall, edge_corrugated, edge_gate, edge_door, edge_curb, street_tile,
     prop_dumpster, prop_barrel, prop_crate, prop_cart, prop_pallet, prop_lamp_wall, prop_vent, prop_ac, prop_pipe, prop_pipe_joint,
 ]
 

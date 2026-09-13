@@ -48,10 +48,13 @@ TILES = {
         colour=0x4A5461,
         # Стена стоит вертикально к камере и ближе всего к глазу: крапинка
         # с той же силой, что на полу, читалась гранитом.
-        contrast=0.25,
-        prompt="close-up photo of uniform stained concrete surface, soft streaks of grime and "
-        "water stains, no joints, no cracks, flat overcast lighting, seamless tileable texture",
-        seed=41,
+        contrast=0.3,
+        # Стена — самая крупная поверхность у глаза, ей 512²: на 256² пятна
+        # расплывались в кляксы, и все панели были одной кляксой.
+        size=512,
+        prompt="close-up photo of cast concrete wall surface, fine grain, small pores, faint "
+        "vertical grime streaks, no joints, no cracks, flat overcast lighting, seamless tileable texture",
+        seed=43,
     ),
     "asphalt": dict(
         colour=0x1C2026,
@@ -105,19 +108,19 @@ def run(name, spec):
     return raw
 
 
-def finish(name, raw, colour, contrast=0.55):
-    """1024² → 256², серый шум вокруг 128, тонированный в цвет палитры."""
+def finish(name, raw, colour, contrast=0.55, size=SIZE):
+    """1024² → 256² (стене 512²), серый шум вокруг 128, тонированный в цвет палитры."""
     img = Image.open(raw).convert("L")
-    img = img.resize((SIZE, SIZE), Image.LANCZOS)
+    img = img.resize((size, size), Image.LANCZOS)
     # Контраст мягкий: тайл — шум, а не рисунок, и повтор не должен бросаться в глаза.
     img = ImageOps.autocontrast(img, cutoff=1)
     img = Image.blend(Image.new("L", img.size, 128), img, contrast)
     # Среднее ложится ровно в палитру, вариация — вокруг неё.
-    mean = sum(img.get_flattened_data()) / (SIZE * SIZE)
+    mean = sum(img.get_flattened_data()) / (size * size)
     rgb = [(colour >> 16) & 255, (colour >> 8) & 255, colour & 255]
     bands = [img.point(lambda v, c=c: min(255, round(c * v / mean))) for c in rgb]
     Image.merge("RGB", bands).save(os.path.join(HERE, f"{name}.png"), optimize=True)
-    print(f"  {name}: {SIZE}², {os.path.getsize(os.path.join(HERE, name + '.png')) / 1024:.1f} КБ")
+    print(f"  {name}: {size}², {os.path.getsize(os.path.join(HERE, name + '.png')) / 1024:.1f} КБ")
 
 
 if __name__ == "__main__":
@@ -126,4 +129,4 @@ if __name__ == "__main__":
     names = sys.argv[1:] or list(TILES)
     for name in names:
         spec = TILES[name]
-        finish(name, run(name, spec), spec["colour"], spec.get("contrast", 0.55))
+        finish(name, run(name, spec), spec["colour"], spec.get("contrast", 0.55), spec.get("size", SIZE))
