@@ -320,134 +320,36 @@ def textured_material(name, atlas):
     return mat
 
 
-GEN_HEAD = os.path.join(GEN_DIR, "head_rusty.glb")
-# Голова с шеей — своя генерация (Tripo P1 по кадру головы с мокапа): у
-# цельного меша голова росла из воротника, и вблизи под затылком зияла щель.
-# Бюст режется по шее — ниже этой доли высоты остаются плечи и воротник.
-HEAD_CUT = 0.30
-HEAD_HEIGHT = 0.30
-HEAD_TRIS = 1200
-HEAD_TEXTURE = 512
-
-
-def import_head():
-    """Голова с шеей из бюста: развернуть лицом в −Y, отрезать плечи,
-    нормировать по высоте, поставить основание шеи в кость Head."""
-    import bmesh
-
-    if not os.path.exists(GEN_HEAD):
-        sys.exit(f"нет {GEN_HEAD}")
-    before = set(bpy.data.objects)
-    bpy.ops.import_scene.gltf(filepath=GEN_HEAD)
-    meshes = [o for o in set(bpy.data.objects) - before if o.type == "MESH"]
-    obj = meshes[0]
-    for o in set(bpy.data.objects) - before:
-        if o.type != "MESH":
-            bpy.data.objects.remove(o)
-    bpy.context.view_layer.objects.active = obj
-    obj.select_set(True)
-    bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
-    obj.name = obj.data.name = "head_rusty"
-
-    me = obj.data
-    # У Tripo лицо смотрит в +X; у нас — в −Y.
-    rot = Matrix.Rotation(math.radians(-90), 4, "Z")
-    for v in me.vertices:
-        v.co = rot @ v.co
-    zs = [v.co.z for v in me.vertices]
-    lo, hi = min(zs), max(zs)
-    cut = lo + (hi - lo) * HEAD_CUT
-    bm = bmesh.new()
-    bm.from_mesh(me)
-    bmesh.ops.bisect_plane(bm, geom=bm.verts[:] + bm.edges[:] + bm.faces[:],
-                           plane_co=(0, 0, cut), plane_no=(0, 0, -1), clear_outer=True)
-    bm.to_mesh(me)
-    bm.free()
-
-    zs = [v.co.z for v in me.vertices]
-    lo, hi = min(zs), max(zs)
-    k = HEAD_HEIGHT / (hi - lo)
-    xs = [v.co.x for v in me.vertices]
-    ys = [v.co.y for v in me.vertices]
-    xc = (min(xs) + max(xs)) / 2
-    # Центр по глубине — по шее (низ), не по морде: морда выступает вперёд.
-    neck = [v.co for v in me.vertices if v.co.z < lo + (hi - lo) * 0.1]
-    yc = sum(c.y for c in neck) / len(neck)
-    for v in me.vertices:
-        v.co = Vector(((v.co.x - xc) * k, (v.co.y - yc) * k, (v.co.z - lo) * k + L["neck"] - 0.02))
-    for poly in me.polygons:
-        poly.use_smooth = True
-
-    now = sum(len(p.vertices) - 2 for p in me.polygons)
-    if now > HEAD_TRIS:
-        d = obj.modifiers.new("dec", "DECIMATE")
-        d.ratio = HEAD_TRIS / now
-        bpy.ops.object.modifier_apply(modifier="dec")
-
-    for mat in me.materials:
-        mat.name = "rusty_head"
-        for node in mat.node_tree.nodes:
-            if node.type == "TEX_IMAGE" and node.image is not None:
-                img = node.image
-                img.name = "head_rusty_albedo"
-                if img.size[0] > HEAD_TEXTURE:
-                    img.scale(HEAD_TEXTURE, HEAD_TEXTURE)
-                img.pack()
-    obj.select_set(False)
-    return obj
-
-
-def skin_head(head, rig):
-    """Голова — на Head целиком, шея — переход к Neck.
-
-    Диффузия на замкнутом бюсте не сходится (после среза он открыт снизу),
-    да и не нужна: голова жёсткая. Вершины выше основания черепа — Head с
-    весом 1; ниже — линейный переход к Neck, чтобы шея гнулась, а не ломалась.
-    """
-    head.parent = rig
-    head.modifiers.new("Armature", "ARMATURE").object = rig
-    g_head = head.vertex_groups.new(name=RIG + "Head")
-    g_neck = head.vertex_groups.new(name=RIG + "Neck")
-    top = L["neck"] + 0.06
-    bottom = L["neck"] - 0.02
-    for v in head.data.vertices:
-        t = min(1.0, max(0.0, (v.co.z - bottom) / (top - bottom)))
-        g_head.add([v.index], t, "REPLACE")
-        if t < 1.0:
-            g_neck.add([v.index], 1.0 - t, "REPLACE")
-
-
 def build_cat(rig):
-    """Корпус и голова из сгенерированных мешей, с весами от скелета."""
+    """Корпус и голова из сгенерированного меша, с весами от скелета."""
     obj = import_gen()
     load_parts(obj)
     atlas = load_texture()
     obj.data.materials.clear()
     obj.data.materials.append(textured_material("rusty_skin", atlas))
 
-    # Голова из цельного меша выбрасывается: у Tripo она росла из
-    # воротника, и вблизи под затылком зияла щель. Своя — с шеей.
-    body, old_head = split_head(obj)
-    bpy.data.objects.remove(old_head)
+    body, head = split_head(obj)
     body.name = body.data.name = "body_stocky"
-    head = import_head()
+    head.name = head.data.name = "head_rusty"
 
     # Автовеса: тепловая диффузия от костей. Сокеты помечены как
     # недеформирующие и веса не получают.
     bpy.ops.object.select_all(action="DESELECT")
     body.select_set(True)
+    head.select_set(True)
     rig.select_set(True)
     bpy.context.view_layer.objects.active = rig
     bpy.ops.object.parent_set(type="ARMATURE_AUTO")
-    if not body.vertex_groups:
-        sys.exit(f"{body.name}: автовеса не легли")
-    skin_head(head, rig)
+    for obj in (body, head):
+        if not obj.vertex_groups:
+            sys.exit(f"{obj.name}: автовеса не легли")
     confine_tail(body, rig)
     pin_rigid_parts(body, rig)
     free_hood_from_head(body)
     for obj in (body, head):
         fill_orphans(obj, rig)
     paint_from_texture(body, atlas)
+    paint_from_texture(head, atlas)
     return body, head
 
 

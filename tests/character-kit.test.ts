@@ -185,12 +185,12 @@ describe('character-kit.glb', () => {
     // если картинка не доедет; рантайм гасит его, когда карта есть.
     for (const name of ['head_rusty', 'body_stocky']) {
       const mesh = json.meshes.find((m) => m.name === name)
+      expect(mesh?.primitives[0]?.attributes.COLOR_0, `${name} без цвета вершин`).toBeDefined()
       expect(mesh?.primitives[0]?.attributes.TEXCOORD_0, `${name} без UV`).toBeDefined()
     }
-    expect(json.meshes.find((m) => m.name === 'body_stocky')?.primitives[0]?.attributes.COLOR_0).toBeDefined()
-    // Корпус, голова, по одной на пропс — не больше: каждая лишняя
-    // картинка — это и вес, и отдельный вызов рисования.
-    expect((json.images ?? []).length).toBeLessThanOrEqual(4)
+    // Одна карта на кота, по одной на сгенерированный пропс — не больше:
+    // каждая лишняя картинка — это и вес, и отдельный вызов рисования.
+    expect((json.images ?? []).length).toBeLessThanOrEqual(3)
   })
 
   it('укладывается в бюджеты техплана', () => {
