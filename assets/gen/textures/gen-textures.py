@@ -8,8 +8,9 @@
 UNet и VAE циклическое дополнение, и картинка замыкается сама на себя без
 сведения швов.
 
-Тайл — «шум поверхности», а не текстура в полном смысле: генерится 1024²,
-ужимается до 256², обесцвечивается и тонируется в цвет палитры двора так,
+Сейчас тайл один — панель стены; бетон пола и асфальт считаются шейдером
+(`src/render/surface.ts`). Тайл — «шум поверхности», а не текстура в полном
+смысле: генерится 1024², ужимается, обесцвечивается и тонируется в цвет палитры так,
 чтобы средний цвет остался ровно палитровым. Цвета — из
 `src/render/palette.ts`, в ките эти материалы идут с белым множителем.
 """
@@ -35,15 +36,6 @@ NEGATIVE = (
 )
 
 TILES = {
-    "concrete_floor": dict(
-        colour=0x22272E,
-        contrast=0.35,
-        # Швов и трещин в тайле быть не должно: шов между плитками — фаска
-        # модуля, а рисунок в метр повторялся бы по всему двору.
-        prompt="top-down close-up photo of uniform weathered concrete surface, fine aggregate "
-        "speckle, dust, no joints, no cracks, flat overcast lighting, seamless tileable texture",
-        seed=13,
-    ),
     "wall_panel": dict(
         colour=0x4A5461,
         # Стена стоит вертикально к камере и ближе всего к глазу: крапинка
@@ -55,12 +47,6 @@ TILES = {
         prompt="close-up photo of cast concrete wall surface, fine grain, small pores, faint "
         "vertical grime streaks, no joints, no cracks, flat overcast lighting, seamless tileable texture",
         seed=43,
-    ),
-    "asphalt": dict(
-        colour=0x1C2026,
-        prompt="top-down photo of dark aged asphalt surface, fine grain, faint patches, "
-        "flat overcast lighting, uniform, seamless tileable texture",
-        seed=37,
     ),
 }
 

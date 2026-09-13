@@ -15,6 +15,7 @@ import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
+import { proceduralAsphalt, proceduralConcrete } from './surface'
 
 const URL_KIT = `${import.meta.env.BASE_URL}models/character-kit.glb`
 
@@ -151,6 +152,18 @@ export class EnvKit {
       list.push(o)
       meshes.set(base, list)
     })
+    // Бетон и асфальт — шейдером по мировой координате, не картинкой.
+    // Материалы в ките общие, править каждый достаточно один раз.
+    const patched = new Set<THREE.Material>()
+    for (const list of meshes.values()) {
+      for (const mesh of list) {
+        const mat = mesh.material
+        if (!(mat instanceof THREE.MeshStandardMaterial) || patched.has(mat)) continue
+        patched.add(mat)
+        if (mat.name === 'concrete') proceduralConcrete(mat)
+        else if (mat.name === 'asphalt') proceduralAsphalt(mat)
+      }
+    }
     const parts = new Map<string, EnvPart>()
     for (const [name, list] of meshes) {
       if (list.length === 1) {
