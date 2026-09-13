@@ -348,9 +348,71 @@ def build_cat(rig):
     free_hood_from_head(body)
     for obj in (body, head):
         fill_orphans(obj, rig)
+    clean_head_texture(head, atlas)
     paint_from_texture(body, atlas)
     paint_from_texture(head, atlas)
     return body, head
+
+
+def clean_head_texture(head, img, passes=48):
+    """Стереть с головы нарисованный на ней воротник.
+
+    У Tripo голова и воротник были одним куском, и UV-остров головы захватил
+    ткань: снизу морды и по щекам тёмный клин куртки. Геометрия головы при
+    этом чистая — резать нечего, красить надо. Текселы граней головы, что
+    темнее меха, заливаются волной от рыжих соседей по тому же острову.
+    Морда — по грани ниже носа: выше усов и глаз тёмное — это и есть глаза.
+    """
+    import numpy as np
+
+    me = head.data
+    w, h = img.size
+    px = np.empty(w * h * 4, dtype=np.float32)
+    img.pixels.foreach_get(px)
+    px = px.reshape(h, w, 4)
+    uv = me.uv_layers.active.data
+    mask = np.zeros((h, w), dtype=bool)
+    nose = L["skull"] - 0.10
+    for poly in me.polygons:
+        if poly.center.z > nose:
+            continue
+        tri = np.array([uv[l].uv[:] for l in poly.loop_indices]) * (w, h)
+        x0, y0 = np.floor(tri.min(axis=0)).astype(int)
+        x1, y1 = np.ceil(tri.max(axis=0)).astype(int)
+        ys, xs = np.mgrid[max(y0, 0):min(y1 + 1, h), max(x0, 0):min(x1 + 1, w)]
+        p = np.stack([xs + 0.5, ys + 0.5], axis=-1)
+        a, b, c = tri[:3]
+        det = (b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1])
+        if abs(det) < 1e-9:
+            continue
+        l1 = ((b[0] - p[..., 0]) * (c[1] - p[..., 1]) - (c[0] - p[..., 0]) * (b[1] - p[..., 1])) / det
+        l2 = ((c[0] - p[..., 0]) * (a[1] - p[..., 1]) - (a[0] - p[..., 0]) * (c[1] - p[..., 1])) / det
+        l3 = 1.0 - l1 - l2
+        inside = (l1 >= -0.02) & (l2 >= -0.02) & (l3 >= -0.02)
+        mask[ys[inside], xs[inside]] = True
+
+    rgb = px[:, :, :3]
+    lum = 0.3 * rgb[:, :, 0] + 0.59 * rgb[:, :, 1] + 0.11 * rgb[:, :, 2]
+    fur = (rgb[:, :, 0] > rgb[:, :, 2] * 1.35) & (lum > 0.14)
+    todo = mask & ~fur
+    good = mask & fur
+    print(f"  голова: {int(mask.sum())} текселов под носом, перекрашено {int(todo.sum())}")
+    shifts = [(dy, dx) for dy in (-1, 0, 1) for dx in (-1, 0, 1) if (dy, dx) != (0, 0)]
+    for _ in range(passes):
+        if not todo.any():
+            break
+        acc = np.zeros_like(rgb)
+        cnt = np.zeros((h, w), dtype=np.float32)
+        for dy, dx in shifts:
+            sc = np.roll(good, (dy, dx), axis=(0, 1))
+            acc += np.roll(rgb, (dy, dx), axis=(0, 1)) * sc[:, :, None]
+            cnt += sc
+        fill = todo & (cnt > 0)
+        rgb[fill] = acc[fill] / cnt[fill][:, None]
+        good |= fill
+        todo &= ~fill
+    img.pixels.foreach_set(px.ravel())
+    img.pack()
 
 
 def free_hood_from_head(obj):
