@@ -17,6 +17,7 @@ import { bone, clip, type CatKit, type CatRig } from './model'
 import { cellToWorld, disposeTree } from './kit'
 import { PALETTE } from './palette'
 import { smoothAlong } from './path'
+import { Hose } from './hose'
 
 /** Части, которые показывает Ржавый. Кит несёт и чужие — они гасятся. */
 const RUSTY_PARTS = ['head_rusty', 'body_stocky', 'gear_vacuum', 'held_vacuum'] as const
@@ -132,10 +133,26 @@ class ModelFigure implements Figure {
   private readonly q = new THREE.Quaternion()
   private readonly e = new THREE.Euler()
   private playing: CatView['action'] | null = null
+  /** Шланг от ранца к раструбу: оба пропса на сокетах, шланг — между ними. */
+  private readonly hose: Hose | null
+  private readonly gear: THREE.Object3D | null
+  private readonly held: THREE.Object3D | null
+  private readonly hoseFrom = new THREE.Vector3()
+  private readonly hoseTo = new THREE.Vector3()
+  private readonly hoseSide = new THREE.Vector3()
 
   constructor(rig: CatRig) {
     this.root.add(this.body)
     this.body.add(rig.root)
+
+    this.gear = rig.root.getObjectByName('gear_vacuum') ?? null
+    this.held = rig.root.getObjectByName('held_vacuum') ?? null
+    if (this.gear !== null && this.held !== null) {
+      this.hose = new Hose(new THREE.MeshLambertMaterial({ color: PALETTE.hose }))
+      this.body.add(this.hose.mesh)
+    } else {
+      this.hose = null
+    }
 
     this.mixer = new THREE.AnimationMixer(rig.root)
     for (const name of ACTIONS) {
@@ -157,6 +174,7 @@ class ModelFigure implements Figure {
   dispose(): void {
     this.mixer.stopAllAction()
     this.mixer.uncacheRoot(this.mixer.getRoot())
+    this.hose?.dispose()
     this.root.removeFromParent()
   }
 
@@ -206,6 +224,26 @@ class ModelFigure implements Figure {
       current.timeScale = footSpeed !== null && speed > 0 ? speed / footSpeed : 1
     }
     this.mixer.update(dt)
+    this.syncHose(dt)
+  }
+
+  /**
+   * Концы шланга — обрубок на крышке ранца и верх рукояти раструба, в
+   * локальных координатах пропсов (glTF: +Y вверх). Считается в системе
+   * `body`, куда шланг и положен: там же, где повёрнут корпус, и без
+   * позиции кота в мире.
+   */
+  private syncHose(dt: number): void {
+    if (this.hose === null || this.gear === null || this.held === null) return
+    this.body.updateWorldMatrix(true, true)
+    this.gear.localToWorld(this.hoseFrom.set(0, 0.36, -0.02))
+    this.held.localToWorld(this.hoseTo.set(0, 0.03, 0))
+    this.body.worldToLocal(this.hoseFrom)
+    this.body.worldToLocal(this.hoseTo)
+    // Вынос через правое плечо (кот держит раструб правой): в системе
+    // `body` право — это −X.
+    this.hoseSide.set(-1, 0, 0)
+    this.hose.update(this.hoseFrom, this.hoseTo, this.hoseSide, dt)
   }
 }
 
