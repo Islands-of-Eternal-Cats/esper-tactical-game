@@ -8,6 +8,7 @@
 import * as THREE from 'three'
 import type { Cell, CatView, PileView, PropKind, Snapshot, WorldView } from '../shared/protocol'
 import { PALETTE } from './palette'
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { DEBRIS, FLOORS, WALL_BLOCKS, type EnvKit } from './model'
 
 /** Обломков на кучу. Куча тает, теряя их по одному. */
@@ -196,6 +197,9 @@ export class Kit {
   private readonly outlines: THREE.LineSegments[] = []
   /** Пропсы на крыше по блокам: гаснут вместе с ним, иначе висят над контуром. */
   private readonly blockProps: { mesh: THREE.InstancedMesh; index: number; matrix: THREE.Matrix4 }[][] = []
+  /** Контуры пропсов блока: показываются вместо них, когда блок гаснет. */
+  private readonly blockPropEdges: THREE.LineSegments[] = []
+  private edgeMaterial!: THREE.LineBasicMaterial
   private ghostSignature = -1
 
   /**
@@ -291,6 +295,7 @@ export class Kit {
       opacity: 0.5,
       depthWrite: false,
     })
+    this.edgeMaterial = edgeMaterial
     const outlineMaterial = new THREE.LineBasicMaterial({
       color: PALETTE.outline,
       transparent: true,
@@ -851,13 +856,25 @@ export class Kit {
       }
     })
 
+    // Контуры пропсов на блок: рёбра каждого инстанса в мировых координатах,
+    // сшитые в одну геометрию. Погасший блок показывает их вместо пропсов —
+    // иначе на месте труб и вентиляции читалась дыра, а не «сквозь видно».
+    const edgesByBlock: THREE.BufferGeometry[][] = this.blocks.map(() => [])
+    const edgeCache = new Map<Kind, THREE.BufferGeometry>()
     this.props.push(...kinds.map((kind) => {
       const list = matrices.get(kind)!
       const { geometry, material } = env.part(kind)
       const mesh = new THREE.InstancedMesh(geometry, material, Math.max(1, list.length))
       list.forEach((m, i) => {
         mesh.setMatrixAt(i, m)
-        this.blockProps[owners.get(kind)![i]!]!.push({ mesh, index: i, matrix: m })
+        const block = owners.get(kind)![i]!
+        this.blockProps[block]!.push({ mesh, index: i, matrix: m })
+        let edges = edgeCache.get(kind)
+        if (edges === undefined) {
+          edges = new THREE.EdgesGeometry(geometry, 40)
+          edgeCache.set(kind, edges)
+        }
+        edgesByBlock[block]!.push(edges.clone().applyMatrix4(m))
       })
       mesh.count = list.length
       mesh.instanceMatrix.needsUpdate = true
@@ -865,15 +882,27 @@ export class Kit {
       this.root.add(mesh)
       return mesh
     }))
+    for (const edges of edgeCache.values()) edges.dispose()
+    edgesByBlock.forEach((pieces, b) => {
+      const merged = pieces.length > 0 ? mergeGeometries(pieces) : new THREE.BufferGeometry()
+      for (const piece of pieces) piece.dispose()
+      const lines = new THREE.LineSegments(merged ?? new THREE.BufferGeometry(), this.edgeMaterial)
+      lines.renderOrder = 3
+      lines.visible = false
+      this.blockPropEdges[b] = lines
+      this.root.add(lines)
+    })
     this.ghostShells.forEach((shell, b) => this.showBlockProps(b, !shell.visible))
   }
 
-  /** Пропсы блока: показать или сжать в точку — инстанс не спрятать иначе. */
+  /** Пропсы блока: показать, либо сжать в точку и показать контуром. */
   private showBlockProps(block: number, shown: boolean): void {
     for (const { mesh, index, matrix } of this.blockProps[block] ?? []) {
       mesh.setMatrixAt(index, shown ? matrix : HIDDEN)
       mesh.instanceMatrix.needsUpdate = true
     }
+    const edges = this.blockPropEdges[block]
+    if (edges !== undefined) edges.visible = !shown
   }
 
   private syncPiles(piles: readonly PileView[]): void {
