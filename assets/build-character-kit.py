@@ -420,29 +420,33 @@ def clean_head_texture(head, img, passes=48):
 
 
 def free_hood_from_head(obj):
-    """Капюшон наклоняется с шеей, но не крутится с головой.
+    """Капюшон наклоняется с шеей и грудью, но не крутится с головой и не
+    машет с руками.
 
     Жёстко на груди он не годится: шея в клипах откидывается назад,
     компенсируя наклон корпуса, и выходит из стоячего воротника сзади.
-    А с весами головы воротник скручивается при рыскании и отходит от
-    куртки над плечом. Поэтому у капюшона снимаются только веса Head —
-    рысканье рантайм целиком кладёт на голову, шею не вращает.
+    А тепловая диффузия раздаёт воротник кому попало: 42 % — костям ушей
+    (они у макушки, но диффузия дотянулась), правый край — на 60 % руке,
+    и при махе в шаге воротник ходил на 8 см. У капюшона остаются только
+    Neck, Spine1 и Spine; остальное снимается, остаток нормируется.
     """
-    head = obj.vertex_groups.get(RIG + "Head")
-    if head is None:
-        return
+    keep = {obj.vertex_groups[RIG + n].index for n in ("Neck", "Spine1", "Spine") if RIG + n in obj.vertex_groups}
     per_vertex = vertex_parts(obj)
     for v in obj.data.vertices:
         if PART["hood"] not in per_vertex[v.index]:
             continue
-        rest = sum(ge.weight for ge in v.groups if ge.group != head.index)
+        rest = sum(ge.weight for ge in v.groups if ge.group in keep)
         if rest <= 0.0:
+            # Совсем без своих костей — целиком на грудь.
+            for g in obj.vertex_groups:
+                g.remove([v.index])
+            obj.vertex_groups[RIG + "Spine1"].add([v.index], 1.0, "REPLACE")
             continue
-        head.remove([v.index])
+        for g in obj.vertex_groups:
+            if g.index not in keep:
+                g.remove([v.index])
         for ge in v.groups:
             obj.vertex_groups[ge.group].add([v.index], ge.weight / rest, "REPLACE")
-
-
 def pin_rigid_parts(obj, rig):
     """Жёсткие детали — на одной кости целиком.
 
