@@ -224,3 +224,28 @@ describe('выбор цели', () => {
     expect(firstShot).toBeGreaterThan(0)
   })
 })
+
+describe('обход', () => {
+  it('юнит обходит стоящего на пути товарища, а не ждёт', () => {
+    const sim = new Sim(1, 'skirmish')
+    // a1 (3,6) идёт вниз мимо a2 (3,9): без обхода он упрётся в него.
+    sim.move(['a1'], { x: 3, y: 12 })
+    let arrived = false
+    for (let t = 0; t < 400 && !arrived; t++) {
+      sim.tick()
+      const a1 = sim.snapshot().units.find((u) => u.id === 'a1')!
+      expect(a1.status).not.toBe('пропускает')
+      arrived = a1.cell.x === 3 && a1.cell.y === 12
+    }
+    expect(arrived).toBe(true)
+  })
+
+  it('к занятой клетке — встаёт рядом', () => {
+    const sim = new Sim(1, 'skirmish')
+    sim.move(['a1'], { x: 3, y: 9 })
+    for (let t = 0; t < 300; t++) sim.tick()
+    const a1 = sim.snapshot().units.find((u) => u.id === 'a1')!
+    expect(a1.action).not.toBe('move')
+    expect(Math.max(Math.abs(a1.cell.x - 3), Math.abs(a1.cell.y - 9))).toBe(1)
+  })
+})

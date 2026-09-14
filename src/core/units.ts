@@ -232,13 +232,45 @@ function trySeekCover(state: State, u: Unit): boolean {
 }
 
 /**
- * Шаг по маршруту с учётом занятости: перед занятой клеткой юнит ждёт, а
- * прождав BLOCKED_MS — бросает маршрут, чтобы двое не стояли друг перед
- * другом вечно. `true` — маршрут кончился, так или иначе.
+ * Обход: тот же маршрут к той же цели, но клетки под другими юнитами —
+ * временно стены. Занятая цель — как стена: встать рядом. Сетка общая,
+ * поэтому стены ставятся и снимаются в одном вызове. `true` — путь найден.
+ */
+function detour(state: State, u: Unit): boolean {
+  const goal = u.path[u.path.length - 1]
+  if (goal === undefined) return false
+  const grid = state.grid
+  const walls: Cell[] = []
+  for (const v of state.units) {
+    if (v === u || !alive(v)) continue
+    const cells = [v.cell]
+    const step = v.path[0]
+    if (v.progress > 0 && step !== undefined) cells.push(step)
+    for (const c of cells) {
+      if (grid.isBlocked(c.x, c.y)) continue
+      grid.setBlocked(c.x, c.y, true)
+      walls.push(c)
+    }
+  }
+  const path = grid.findPathNear(origin(u), goal)
+  for (const c of walls) grid.setBlocked(c.x, c.y, false)
+  if (path === null || path.length === 0) return false
+  setPath(u, path)
+  return true
+}
+
+/**
+ * Шаг по маршруту с учётом занятости: перед занятой клеткой юнит сначала
+ * ищет обход, не найдя — ждёт, а прождав BLOCKED_MS — бросает маршрут,
+ * чтобы двое не стояли друг перед другом вечно. `true` — маршрут кончился.
  */
 function step(state: State, u: Unit, walking: string): boolean {
   const next = u.path[0]
   if (next !== undefined && u.progress === 0 && occupied(state, next, u)) {
+    if (u.blockedMs === 0 && detour(state, u)) {
+      u.status = walking
+      return advance(u, UNIT_MS_PER_CELL, (cell) => occupied(state, cell, u))
+    }
     u.blockedMs += TICK_MS
     if (u.blockedMs < BLOCKED_MS) {
       u.status = UNIT_STATUS.yield
