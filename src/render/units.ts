@@ -11,7 +11,6 @@ import type { Dir, Event, Snapshot, UnitSign, UnitView, WorldView } from '../sha
 import { Glide } from './glide'
 import { disposeTree } from './kit'
 import { assembleGun, holdOf } from './guns'
-import { reach } from './ik'
 import { type CharacterKit, type CharacterRig, type GunKit, clip, joint } from './model'
 import { PALETTE } from './palette'
 import { Signs } from './signs'
@@ -305,10 +304,10 @@ class ModelFigure implements Figure {
   private readonly gunAhead: number
   private readonly handR: THREE.Object3D | null
   private readonly handL: THREE.Object3D | null
-  private readonly armL: THREE.Object3D | null
-  private readonly foreArmL: THREE.Object3D | null
-  /** Где на оружии лежит левая ладонь, в осях оружия. */
-  private readonly hold: THREE.Vector3
+  /** Расстояние от рукояти до цевья, м: по нему оружие масштабируется под ладони клипа. */
+  private readonly hold: number
+  /** Базовый масштаб модели оружия, как собрана. */
+  private readonly gunScale: number
   private readonly v1 = new THREE.Vector3()
   private readonly v2 = new THREE.Vector3()
   private readonly v3 = new THREE.Vector3()
@@ -347,24 +346,25 @@ class ModelFigure implements Figure {
         stub.castShadow = true
         this.gun = stub
         this.gunAhead = GUN_AHEAD
-        this.hold = new THREE.Vector3(0, -0.02, GUN_AHEAD + GUN_LENGTH * 0.2)
+        this.hold = 0
+        this.gunScale = 1
       } else {
         this.gun = gun
         this.gunAhead = 0
         this.hold = holdOf(gun)
+        this.gunScale = gun.scale.x
       }
       this.body.add(this.gun)
       // Не `bone()`: у Y Bot кисти и пальцы без весов, и загрузчик делает
       // их не костями, а простыми узлами — ищутся по имени в иерархии.
       this.handR = joint(rig, 'mixamorig:RightHand')
       this.handL = joint(rig, 'mixamorig:LeftHand')
-      this.armL = joint(rig, 'mixamorig:LeftArm')
-      this.foreArmL = joint(rig, 'mixamorig:LeftForeArm')
     } else {
       this.gun = null
       this.gunAhead = 0
-      this.hold = new THREE.Vector3()
-      this.handR = this.handL = this.armL = this.foreArmL = null
+      this.hold = 0
+      this.gunScale = 1
+      this.handR = this.handL = null
     }
 
     this.mixer = new THREE.AnimationMixer(rig.root)
@@ -414,7 +414,13 @@ class ModelFigure implements Figure {
       current.timeScale = footSpeed !== null && speed > 0 ? speed / footSpeed : 1
     }
     this.mixer.update(dt)
-    this.placeGun(action === 'aim' || action === 'fire')
+    // В клипе смерти руки разлетаются, и оружие, натянутое между ладонями,
+    // проходило сквозь тело: убитый его роняет — с первого кадра падения.
+    if (action === 'dead') {
+      if (this.gun !== null) this.gun.visible = false
+      return
+    }
+    this.placeGun()
   }
 
   /** Цикл бега — два шага: путь за клип пополам. */
@@ -425,31 +431,23 @@ class ModelFigure implements Figure {
     return footSpeed === null ? STANDIN_STRIDE : (footSpeed * current.getClip().duration) / 2
   }
 
-  private placeGun(aiming: boolean): void {
+  private placeGun(): void {
     if (this.gun === null || this.handR === null || this.handL === null) return
     this.body.updateWorldMatrix(true, true)
     const grip = this.body.worldToLocal(this.handR.getWorldPosition(this.v1))
-    // Все клипы кита — «с винтовкой»: обе ладони на оружии, ствол — от
-    // правой к левой. Правая держит рукоять под коробкой, левая — цевьё
-    // снизу, поэтому линия ладоней — под осью ствола, а не она сама:
-    // оружие ставится рукоятью в правую ладонь, чуть ниже, с верхом по телу.
-    // В прицеле и при выстреле — строго вперёд по телу: тело уже повёрнуто
-    // на цель, а ладони в клипе лежат по диагонали (у кота руки короче
-    // человеческих) и задирали бы ствол на 25° вверх, а в отдаче — в небо.
-    const dir = aiming
-      ? this.v2.set(0, 0, 1)
-      : this.body.worldToLocal(this.handL.getWorldPosition(this.v2)).sub(grip)
-    if (dir.lengthSq() < 1e-6) return
-    dir.normalize()
+    // Клипы кита — «с винтовкой», обе ладони уже поставлены под оружие:
+    // рукоять в правой, ствол к левой, верх — по телу. Никакой IK: клип
+    // авторский, ему виднее. Размер — под ладони: цевьё модели ложится в
+    // левую ладонь при том расстоянии между руками, какое даёт клип.
+    const dir = this.body.worldToLocal(this.handL.getWorldPosition(this.v2)).sub(grip)
+    const span = dir.length()
+    if (span < 1e-3) return
+    dir.divideScalar(span)
     LOOK.lookAt(dir, ZERO, UP)
     this.gun.quaternion.setFromRotationMatrix(LOOK)
     this.gun.position.copy(grip).addScaledVector(dir, this.gunAhead).addScaledVector(UP, -GUN_DROP)
-    if (this.armL === null || this.foreArmL === null) return
-    // Левая ладонь — на цевьё, IK дотягивает кисть: клипы кладут её рядом
-    // с оружием, но не на него. Цель — в осях оружия, значит и под стволом.
-    // Не localToWorld оружия: узел масштабирован, а `hold` — в метрах.
-    const target = this.body.localToWorld(this.v3.copy(this.hold).applyQuaternion(this.gun.quaternion).add(this.gun.position))
-    reach(this.armL, this.foreArmL, this.handL, target, DOWN)
+    // Множитель поверх базового масштаба модели, в разумных пределах.
+    if (this.hold > 0) this.gun.scale.setScalar(this.gunScale * Math.min(1.25, Math.max(0.8, span / this.hold)))
   }
 }
 
@@ -458,7 +456,6 @@ const GUN_DROP = 0.03
 const ZERO = new THREE.Vector3()
 const UP = new THREE.Vector3(0, 1, 0)
 const LOOK = new THREE.Matrix4()
-const DOWN = new THREE.Vector3(0, -1, 0)
 
 
 interface UnitObject {

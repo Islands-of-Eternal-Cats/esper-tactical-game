@@ -23,13 +23,14 @@ const GRIP_RISE = 0.1
 
 const AXIS_Y = new THREE.Vector3(0, 1, 0)
 
-/** Левая ладонь снизу обхватывает цевьё: на столько ниже оси ствола, в единицах кита. */
-const HAND_UNDER = 0.1
-
-/** Где на оружии лежит левая ладонь, в осях оружия (+Z вперёд, +Y вверх), м. */
-export function holdOf(gun: THREE.Object3D): THREE.Vector3 {
+/**
+ * Расстояние от рукояти до цевья при масштабе 1 (то есть GUN_SCALE), м.
+ * Рендер делит на него расстояние между ладонями клипа и получает, во
+ * сколько раз ещё растянуть оружие, чтобы цевьё легло в левую ладонь.
+ */
+export function holdOf(gun: THREE.Object3D): number {
   const v: unknown = gun.userData['hold']
-  return v instanceof THREE.Vector3 ? v : new THREE.Vector3(0, -0.02, 0.15)
+  return typeof v === 'number' ? v : 0.2
 }
 
 export function assembleGun(kit: GunKit, look: WeaponLook): THREE.Group {
@@ -59,12 +60,9 @@ export function assembleGun(kit: GunKit, look: WeaponLook): THREE.Group {
   gun.scale.setScalar(GUN_SCALE)
   gun.add(turn)
   // Цевьё — на 60 % длины переда от рукояти: и у короткого автомата, и у
-  // снайперской ладонь ложится где ей место. По высоте — под осью ствола:
-  // ладонь обхватывает цевьё снизу, а не лежит на линии ствола.
+  // снайперской ладонь ложится где ей место.
   // Бокс — в осях `turn`: части уже сдвинуты на минус рукоять, и max.x — перед.
   const box = new THREE.Box3().setFromObject(assembly)
-  const barrel = sockets['barrel'] ?? [0, 0, 0]
-  const axisY = barrel[1] - grip[1] - GRIP_RISE
-  gun.userData['hold'] = new THREE.Vector3(0, (axisY - HAND_UNDER) * GUN_SCALE, Math.max(0.05, box.max.x * 0.6 * GUN_SCALE))
+  gun.userData['hold'] = Math.max(0.05, box.max.x * 0.6 * GUN_SCALE)
   return gun
 }
