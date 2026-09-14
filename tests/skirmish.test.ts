@@ -166,3 +166,20 @@ describe('двор без боя', () => {
     expect(s.units).toHaveLength(4)
   })
 })
+
+describe('занятость клеток', () => {
+  it('двое живых никогда не стоят в одной клетке', () => {
+    for (const seed of [1, 4, 8]) {
+      const sim = new Sim(seed, 'skirmish')
+      // Обоих в одну клетку — самый верный способ столкнуть.
+      sim.move(['a1', 'a2'], { x: 10, y: 11 })
+      for (let t = 0; t < LIMIT; t++) {
+        sim.tick()
+        const live = sim.snapshot().units.filter((u) => u.action !== 'dead')
+        const cells = new Set(live.map((u) => `${u.cell.x},${u.cell.y}`))
+        expect(cells.size).toBe(live.length)
+        if (alive(sim.snapshot()).size < 2) break
+      }
+    }
+  })
+})

@@ -66,7 +66,10 @@ export function setPath(m: Mover, path: Cell[]): void {
  * Продвижение по пути. `true` — путь пройден.
  *
  * `blocked` — клетка, в которую нельзя ступить прямо сейчас (кто-то стоит).
- * Проверяется только на старте шага: тот, кто уже между клетками, доходит.
+ * Проверяется на старте шага: тот, кто уже между клетками, доходит. А чтобы
+ * старт шага вообще случался, остаток прогресса за пересечённой клеткой не
+ * переносится на занятую следующую — иначе шаг в неё начинался бы без
+ * проверки, и двое сходились бы в одной клетке.
  */
 export function advance(m: Mover, msPerCell: number, blocked?: (cell: Cell) => boolean): boolean {
   if (m.path.length === 0) return true
@@ -87,7 +90,14 @@ export function advance(m: Mover, msPerCell: number, blocked?: (cell: Cell) => b
     m.prev = m.cell
     m.cell = m.path.shift()!
     const ahead = m.path[0]
-    if (ahead !== undefined) m.facing = dirOf(m.cell, ahead) ?? m.facing
+    if (ahead !== undefined) {
+      m.facing = dirOf(m.cell, ahead) ?? m.facing
+      if (blocked !== undefined && blocked(ahead)) {
+        m.progress = 0
+        m.moveAcc = 0
+        break
+      }
+    }
   }
 
   if (m.path.length === 0) {

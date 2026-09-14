@@ -228,7 +228,7 @@ function step(state: State, u: Unit): boolean {
     return true
   }
   u.blockedMs = 0
-  return advance(u, UNIT_MS_PER_CELL)
+  return advance(u, UNIT_MS_PER_CELL, (cell) => occupied(state, cell, u))
 }
 
 // ─── автомат ─────────────────────────────────────────────────────────────
