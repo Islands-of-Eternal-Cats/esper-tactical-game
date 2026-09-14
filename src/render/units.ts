@@ -27,6 +27,13 @@ const HEADING: Record<Dir, [number, number]> = {
 }
 
 const TURN_RATE = 18
+/**
+ * Куда ложится тело в клипе смерти, в системе фигуры (x вправо, z вперёд):
+ * голова и дальняя нога. Измерено по `cat_die`; у Y Bot — тот же клип.
+ * По этим точкам при смерти выбирается поворот, чтобы труп не лёг в стену.
+ */
+const FALL_HEAD: [number, number] = [-0.5, 0.45]
+const FALL_FEET: [number, number] = [-0.35, -0.41]
 /** Трассер живёт 3–4 кадра; вспышка чуть дольше, чтобы её успели увидеть. */
 const TRACER_S = 0.07
 const FLASH_S = 0.16
@@ -452,12 +459,52 @@ export class Units {
   private kit: CharacterKit | null = null
   private catKit: CharacterKit | null = null
 
+  /** Занятые клетки двора — стены, пропсы, контейнер: куда трупу не лечь. */
+  private readonly solid = new Set<number>()
+
   constructor(
     private readonly scene: THREE.Scene,
     private readonly world: WorldView,
   ) {
     this.glide = new Glide(world)
+    for (const c of world.walls) this.solid.add(c.y * world.width + c.x)
+    for (const p of world.props) this.solid.add(p.cell.y * world.width + p.cell.x)
+    this.solid.add(world.container.y * world.width + world.container.x)
     scene.add(this.root)
+  }
+
+  private free(x: number, z: number): boolean {
+    const cx = Math.floor(x + this.world.width / 2)
+    const cy = Math.floor(z + this.world.height / 2)
+    if (cx < 0 || cy < 0 || cx >= this.world.width || cy >= this.world.height) return false
+    return !this.solid.has(cy * this.world.width + cx)
+  }
+
+  /**
+   * Поворот для падения: ближайший к текущему из восьми, при котором голова
+   * и ноги ложатся на свободные клетки. Не нашлось — текущий, как есть.
+   */
+  private fallYaw(at: THREE.Vector3, yaw: number): number {
+    const fits = (a: number): boolean => {
+      for (const [ox, oz] of [FALL_HEAD, FALL_FEET]) {
+        const wx = at.x + ox * Math.cos(a) + oz * Math.sin(a)
+        const wz = at.z - ox * Math.sin(a) + oz * Math.cos(a)
+        if (!this.free(wx, wz)) return false
+      }
+      return true
+    }
+    let best = yaw
+    let bestD = Infinity
+    for (let k = 0; k < 8; k++) {
+      const a = yaw + (k * Math.PI) / 4
+      if (!fits(a)) continue
+      const d = Math.abs(((k * Math.PI) / 4 + Math.PI) % (2 * Math.PI) - Math.PI)
+      if (d < bestD) {
+        bestD = d
+        best = a
+      }
+    }
+    return best
   }
 
   /**
@@ -488,6 +535,8 @@ export class Units {
       return new ModelFigure(rig, clipOf, null, CAT_HEIGHT, this.signs, true)
     }
     const rig = this.kit.spawn(['unit_body'])
+    // Кит юнитов несёт и скелет кота (для его боевых клипов): Y Bot он не нужен.
+    rig.root.getObjectByName('cat_rig')?.removeFromParent()
     return new ModelFigure(rig, (action) => clip(rig, CLIP_OF[action]), color, MODEL_HEIGHT, this.signs, false)
   }
 
@@ -548,6 +597,7 @@ export class Units {
       yawTarget = Math.atan2(hx, hz)
     }
     if (view.action !== 'dead') obj.yaw = approachAngle(obj.yaw, yawTarget, TURN_RATE, dt)
+    else if (!obj.dead) obj.yaw = this.fallYaw(this.a, obj.yaw)
     obj.figure.setYaw(obj.yaw)
     obj.figure.overlay.setHp(view.hp)
     obj.figure.overlay.setCover(view.cover)

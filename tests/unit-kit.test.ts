@@ -59,13 +59,29 @@ describe.skipIf(!present)('контракт unit-kit.glb', () => {
     expect(found!.skin, 'меш без скина').toBeDefined()
   })
 
-  it('кости — Mixamo, без номера в префиксе', () => {
+  it('кости скина — Mixamo; скелет кота рядом — те же имена без суффикса', () => {
     const { json } = data()
+    // Два скелета с одинаковыми костями в одном файле: экспортёр даёт
+    // вторым суффикс `_1`. Клипы привязаны к узлам, а не к именам, поэтому
+    // это безвредно — но кот должен получить имена без суффикса: его клипы
+    // `cat_*` ищут кости в его собственном ките по имени.
     const joints = new Set(json.skins.flatMap((s) => s.joints.map((j) => json.nodes[j]!.name)))
-    for (const b of ['mixamorig:Hips', 'mixamorig:Spine', 'mixamorig:LeftFoot', 'mixamorig:RightFoot', 'mixamorig:Head']) {
-      expect(joints.has(b), `нет кости ${b}`).toBe(true)
+    for (const b of ['Hips', 'Spine', 'LeftFoot', 'RightFoot', 'Head']) {
+      expect([...joints].some((j) => new RegExp(`^mixamorig:${b}(_\\d+)?$`).test(j)), `нет кости ${b}`).toBe(true)
     }
     expect([...joints].some((j) => /^mixamorig\d/.test(j))).toBe(false)
+    const catRig = json.nodes.find((n) => n.name === 'cat_rig')
+    expect(catRig, 'нет узла cat_rig').toBeDefined()
+    const catBones = new Set<string>()
+    const queue = [...(catRig!.children ?? [])]
+    for (let h = 0; h < queue.length; h++) {
+      const n = json.nodes[queue[h]!]!
+      catBones.add(n.name)
+      for (const c of n.children ?? []) queue.push(c)
+    }
+    for (const b of ['mixamorig:Hips', 'mixamorig:RightHand', 'mixamorig:LeftHand', 'mixamorig:RightForeArm']) {
+      expect(catBones.has(b), `у скелета кота нет ${b}`).toBe(true)
+    }
   })
 
   it('клипы по контракту, у бега — скорость ног', () => {
