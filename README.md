@@ -59,8 +59,7 @@ npm run build    # сборка и проверка бюджета загруз�
 
 ## Срез «Перестрелка»
 
-Шаги 1–6 из [docs/tactics-plan.md](docs/tactics-plan.md). Шаг 7 — кит
-юнитов и анимации — ждёт ассетов; бой идёт на капсулах.
+Все семь шагов из [docs/tactics-plan.md](docs/tactics-plan.md).
 
 | Шаг | Что | Где |
 | --- | --- | --- |
@@ -70,6 +69,7 @@ npm run build    # сборка и проверка бюджета загруз�
 | 4 | протокол, капсулы, трассеры по событиям | `src/shared/protocol.ts`, `src/render/{units,glide}.ts` |
 | 5 | выделение, приказ `move`, маркеры, HUD | `src/render/{select,scene}.ts`, `src/ui/hud.ts` |
 | 6 | поиск укрытия, `cover` в снапшоте, щиток | `src/core/units.ts`, `src/render/units.ts` |
+| 7 | кит юнитов из Mixamo: скелет, `idle / run / aim / fire / die` | `assets/build-unit-kit.py`, `public/models/unit-kit.glb`, `tests/unit-kit.test.ts` |
 
 Управление: клик по своему — выделить · тянуть — рамка · Shift — добавить ·
 клик по земле — идти туда · правая кнопка — снять выделение · тянуть правой —
