@@ -269,9 +269,10 @@ function footSpeedOf(clip: THREE.AnimationClip): number | null {
  * этого ствол каждый кадр строится по положениям костей: в прицеле — от
  * правой ладони к левой (обе лежат на винтовке), иначе — вдоль предплечья.
  */
-const GUN_LENGTH = 0.42
-/** Насколько центр ствола впереди правой ладони: за рукоять держат у приклада. */
-const GUN_AHEAD = 0.08
+const GUN_LENGTH = 0.6
+/** Приклад — за хватом, у плеча; всё остальное — вперёд, за левую ладонь. */
+const GUN_STOCK = 0.15
+const GUN_AHEAD = GUN_LENGTH / 2 - GUN_STOCK
 
 class ModelFigure implements Figure {
   readonly root = new THREE.Group()
