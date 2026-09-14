@@ -250,6 +250,30 @@ describe('ответный огонь', () => {
   })
 })
 
+describe('очередь', () => {
+  it('автомат стреляет по три подряд, потом пауза', () => {
+    // Тики выстрелов одного автоматчика: внутри тройки — burstMs, между — reloadMs.
+    const smg = new Sim(1, 'skirmish').snapshot().units.find((u) => u.weapon === 'smg')
+    expect(smg).toBeDefined()
+    const sim = new Sim(1, 'skirmish')
+    const ticks: number[] = []
+    for (let t = 0; t < 3000 && ticks.length < 6; t++) {
+      sim.tick()
+      const snap = sim.snapshot()
+      if (snap.events.some((e) => e.t === 'shot' && e.from === smg!.id)) ticks.push(t)
+      if (alive(snap).size < 2) break
+    }
+    expect(ticks.length).toBe(6)
+    const gaps = ticks.slice(1).map((t, i) => t - ticks[i]!)
+    // burstMs 130 / 50 мс тик ≈ 3 тика; reloadMs 1000 — 20.
+    expect(gaps[0]).toBeLessThan(5)
+    expect(gaps[1]).toBeLessThan(5)
+    expect(gaps[2]).toBeGreaterThan(15)
+    expect(gaps[3]).toBeLessThan(5)
+    expect(gaps[4]).toBeLessThan(5)
+  })
+})
+
 describe('обход', () => {
   it('юнит обходит стоящего на пути товарища, а не ждёт', () => {
     const sim = new Sim(1, 'skirmish')

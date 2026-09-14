@@ -19,6 +19,10 @@ export interface Weapon {
   readonly hitPerCell: number
   readonly coverMul: number
   readonly damage: number
+  /** Выстрелов в очереди; 1 — одиночный. */
+  readonly burst: number
+  /** Пауза между выстрелами внутри очереди; reloadMs — после неё. */
+  readonly burstMs: number
 }
 
 const FIELDS = ['fireRange', 'aimMs', 'reloadMs', 'fireMs', 'hitBase', 'hitPerCell', 'coverMul', 'damage'] as const
@@ -45,6 +49,12 @@ function parse(id: string, entry: unknown): Weapon {
   if (n('hitPerCell') > 0) fail(id, 'hitPerCell должно быть ≤ 0')
   if (n('coverMul') < 0 || n('coverMul') > 1000) fail(id, 'coverMul вне 0..1000')
   if (n('damage') < 1) fail(id, 'damage ≥ 1')
+  // Очередь — необязательна: одиночное оружие её не упоминает.
+  const burst = e.burst === undefined ? 1 : e.burst
+  const burstMs = e.burstMs === undefined ? 0 : e.burstMs
+  if (typeof burst !== 'number' || !Number.isInteger(burst) || burst < 1) fail(id, 'burst — целое ≥ 1')
+  if (typeof burstMs !== 'number' || !Number.isInteger(burstMs)) fail(id, 'burstMs должно быть целым')
+  if (burst > 1 && (burstMs < n('fireMs') || burstMs > n('reloadMs'))) fail(id, 'burstMs вне fireMs..reloadMs')
   return {
     id,
     name: e.name,
@@ -56,6 +66,8 @@ function parse(id: string, entry: unknown): Weapon {
     hitPerCell: n('hitPerCell'),
     coverMul: n('coverMul'),
     damage: n('damage'),
+    burst,
+    burstMs,
   }
 }
 

@@ -156,6 +156,12 @@ function die(state: State, u: Unit): void {
   state.events.push({ t: 'died', unit: u.id })
 }
 
+/** Очередь не кончена: следующий выстрел — через burstMs, а не через перезарядку. */
+function inBurst(u: Unit): boolean {
+  const w = weaponOf(u.weapon)
+  return w.burst > 1 && u.shots % w.burst !== 0
+}
+
 function shoot(state: State, u: Unit, t: Unit): void {
   const w = weaponOf(u.weapon)
   const cover = coverFrom(state.grid, t.cell, u.cell)
@@ -370,8 +376,12 @@ function stepAim(state: State, u: Unit): void {
     }
   }
 
-  const pinned = u.underFireMs > 0 && coverFrom(state.grid, u.cell, t.cell)
-  u.status = pinned ? UNIT_STATUS.pinned : u.shots === 0 ? UNIT_STATUS.aim : UNIT_STATUS.reload
+  // Между выстрелами очереди он всё ещё стреляет — знак перезарядки мигать не должен.
+  if (inBurst(u)) u.status = UNIT_STATUS.fire
+  else {
+    const pinned = u.underFireMs > 0 && coverFrom(state.grid, u.cell, t.cell)
+    u.status = pinned ? UNIT_STATUS.pinned : u.shots === 0 ? UNIT_STATUS.aim : UNIT_STATUS.reload
+  }
   u.waitMs -= TICK_MS
   if (u.waitMs <= 0) shoot(state, u, t)
 }
@@ -381,8 +391,9 @@ function stepFire(u: Unit): void {
   if (u.waitMs <= 0) {
     const w = weaponOf(u.weapon)
     u.mode = 'aim'
-    u.waitMs = w.reloadMs - w.fireMs
-    u.status = UNIT_STATUS.reload
+    const burst = inBurst(u)
+    u.waitMs = (burst ? w.burstMs : w.reloadMs) - w.fireMs
+    u.status = burst ? UNIT_STATUS.fire : UNIT_STATUS.reload
   }
 }
 

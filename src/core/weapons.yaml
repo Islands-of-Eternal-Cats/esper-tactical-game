@@ -11,6 +11,11 @@
 #   hitPerCell — прибавка к шансу на клетку дальности (отрицательная)
 #   coverMul   — множитель шанса по укрытому
 #   damage     — снимает здоровья за попадание (HP в tuning.ts)
+#   burst      — выстрелов в очереди (необязательно, 1 — одиночный)
+#   burstMs    — между выстрелами внутри очереди, fireMs..reloadMs
+#
+# Очередь — это burst бросков подряд: шанс за очередь выше одиночного,
+# поэтому hitBase у автомата ниже, а reloadMs — пауза уже между очередями.
 
 rifle:
   name: винтовка
@@ -27,12 +32,14 @@ smg:
   name: автомат
   fireRange: 6
   aimMs: 500
-  reloadMs: 500
-  fireMs: 150
-  hitBase: 450
-  hitPerCell: -60
+  reloadMs: 1000
+  fireMs: 100
+  hitBase: 320
+  hitPerCell: -45
   coverMul: 350
   damage: 1
+  burst: 3
+  burstMs: 130
 
 shotgun:
   name: дробовик
