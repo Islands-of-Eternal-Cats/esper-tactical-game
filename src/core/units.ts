@@ -88,20 +88,26 @@ function inFireRange(u: Unit, other: Unit): boolean {
 }
 
 /**
- * Цель: прежняя, пока видна, иначе ближайшая видимая. Ничья — по id.
- * Прилипчивость нужна, чтобы прицел не прыгал между двумя равноудалёнными.
+ * Цель. Сначала те, кого можно достать: видимая цель вне дальности огня
+ * не стоит того, чтобы под неё подставлять спину. Среди достижимых — тот,
+ * кто стреляет в тебя, потом прежняя цель (прицел не должен прыгать между
+ * двумя равными), потом ближайший; ничья — по id. Если достать некого,
+ * прежняя цель остаётся, пока видна, иначе — ближайшая видимая.
  */
 function acquire(state: State, u: Unit): Unit | null {
-  const current = unitById(state, u.target)
-  if (current !== null && alive(current) && visible(state, u, current)) return current
   let best: Unit | null = null
-  let bestD = 0
+  let bestKey = 0
   for (const v of state.units) {
     if (v.side === u.side || !alive(v) || !visible(state, u, v)) continue
     const d = octile(u.cell, v.cell)
-    if (best === null || d < bestD || (d === bestD && v.id < best.id)) {
+    // Меньше — лучше: разряды старше расстояния.
+    let key = d
+    if (v.id === u.target) key -= 1_000
+    if (u.underFireMs > 0 && v.id === u.threat) key -= 10_000
+    if (inFireRange(u, v)) key -= 100_000
+    if (best === null || key < bestKey || (key === bestKey && v.id < best.id)) {
       best = v
-      bestD = d
+      bestKey = key
     }
   }
   return best

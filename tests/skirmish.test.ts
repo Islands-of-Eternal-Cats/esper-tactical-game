@@ -200,3 +200,27 @@ describe('ожидание у занятой клетки', () => {
     expect(waited).toBeGreaterThan(0)
   })
 })
+
+describe('выбор цели', () => {
+  it('тот, кто стреляет в упор, важнее прежней цели вне дальности', () => {
+    // Свой стоит, противник b2 видим, но далеко; b1 подходит и стреляет.
+    // Через пару секунд после первого выстрела b1 свой должен целиться в b1.
+    const sim = new Sim(1, 'skirmish')
+    let firstShot = -1
+    for (let t = 0; t < 3000; t++) {
+      sim.tick()
+      const snap = sim.snapshot()
+      if (firstShot < 0) {
+        const shot = snap.events.find((e) => e.t === 'shot' && e.to.startsWith('a') && e.from === 'b1')
+        if (shot) firstShot = t
+        continue
+      }
+      if (t - firstShot < 60) continue
+      const victim = snap.units.find((u) => u.id === 'a2')!
+      // Если жертва ещё жива и b1 всё ещё виден ей — она либо целится в него, либо бежит в укрытие.
+      if (victim.action !== 'dead' && victim.target !== null) expect(victim.target).toBe('b1')
+      break
+    }
+    expect(firstShot).toBeGreaterThan(0)
+  })
+})

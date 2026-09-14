@@ -46,6 +46,17 @@ describe('линия видимости', () => {
     }
   })
 
+  it('симметрична на всём дворе, включая углы', () => {
+    const g = wallWithGap()
+    g.setBlocked(3, 7, true)
+    g.setBlocked(8, 2, true)
+    const cells: { x: number; y: number }[] = []
+    for (let y = 0; y < g.height; y++) for (let x = 0; x < g.width; x++) if (!g.isBlocked(x, y)) cells.push({ x, y })
+    for (const a of cells) for (const b of cells) {
+      if (lineOfSight(g, a, b) !== lineOfSight(g, b, a)) throw new Error(`несимметрично: ${a.x},${a.y} ↔ ${b.x},${b.y}`)
+    }
+  })
+
   it('соседей видно всегда', () => {
     const g = wallWithGap()
     expect(lineOfSight(g, { x: 4, y: 4 }, { x: 5, y: 4 })).toBe(true)
