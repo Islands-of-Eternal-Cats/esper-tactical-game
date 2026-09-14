@@ -53,7 +53,7 @@ smg:
   burstMs: 130
   look:
     body: Body_SMG_1
-    barrel: Barrel_Single
+    barrel: Barrel_Pistol_1
     stock: Stock_SMG_1
     grip: Grip_SMG_1
     magazine: Magazine_SMG_1

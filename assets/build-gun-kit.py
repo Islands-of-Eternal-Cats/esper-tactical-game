@@ -43,7 +43,7 @@ PARTS = [
     # винтовка
     "Body_AR_1", "Barrel_AR_1", "Stock_AR_1", "Grip_AR_1", "Magazine_AR",
     # автомат
-    "Body_SMG_1", "Stock_SMG_1", "Grip_SMG_1", "Magazine_SMG_1", "Barrel_Single",
+    "Body_SMG_1", "Stock_SMG_1", "Grip_SMG_1", "Magazine_SMG_1", "Barrel_Pistol_1",
     # дробовик — из «гранатомётных» частей: коротко и толсто
     "Body_Grenade_2", "Barrel_Grenade_1", "Stock_Grenade_2", "Grip_Grenade_2",
     # снайперская
@@ -59,7 +59,7 @@ BODIES = [p for p in PARTS if p.startswith("Body_") and not p.startswith("Body_F
 # вдоль +X. Чего нет — считается из геометрии в sockets_of.
 SOCKETS = {
     "Body_AR_1": {"barrel": (0.24, 0.02), "stock": (-0.36, 0.03), "grip": (-0.24, -0.24)},
-    "Body_SMG_1": {"barrel": (0.22, -0.05), "stock": (-0.44, -0.04), "grip": (-0.28, -0.36),
+    "Body_SMG_1": {"barrel": (0.30, -0.05), "stock": (-0.44, -0.04), "grip": (-0.28, -0.36),
                    "magazine": (0.20, -0.21)},
     # Ствол гранатомёта на глаз: в образцах его нет, а по краю корпуса он висел низко.
     "Body_Grenade_2": {"barrel": (0.50, -0.03), "stock": (-0.74, -0.06), "grip": (-0.53, -0.39)},
@@ -74,7 +74,7 @@ SOCKETS = {
 PREVIEW = {
     "rifle": {"body": "Body_AR_1", "barrel": "Barrel_AR_1", "stock": "Stock_AR_1",
               "grip": "Grip_AR_1", "magazine": "Magazine_AR", "top": "Sight_1"},
-    "smg": {"body": "Body_SMG_1", "barrel": "Barrel_Single", "stock": "Stock_SMG_1",
+    "smg": {"body": "Body_SMG_1", "barrel": "Barrel_Pistol_1", "stock": "Stock_SMG_1",
             "grip": "Grip_SMG_1", "magazine": "Magazine_SMG_1"},
     "shotgun": {"body": "Body_Grenade_2", "barrel": "Barrel_Grenade_1", "stock": "Stock_Grenade_2",
                 "grip": "Grip_Grenade_2"},
