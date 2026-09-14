@@ -414,7 +414,7 @@ class ModelFigure implements Figure {
       current.timeScale = footSpeed !== null && speed > 0 ? speed / footSpeed : 1
     }
     this.mixer.update(dt)
-    this.placeGun()
+    this.placeGun(action === 'aim' || action === 'fire')
   }
 
   /** Цикл бега — два шага: путь за клип пополам. */
@@ -425,7 +425,7 @@ class ModelFigure implements Figure {
     return footSpeed === null ? STANDIN_STRIDE : (footSpeed * current.getClip().duration) / 2
   }
 
-  private placeGun(): void {
+  private placeGun(aiming: boolean): void {
     if (this.gun === null || this.handR === null || this.handL === null) return
     this.body.updateWorldMatrix(true, true)
     const grip = this.body.worldToLocal(this.handR.getWorldPosition(this.v1))
@@ -433,7 +433,12 @@ class ModelFigure implements Figure {
     // правой к левой. Правая держит рукоять под коробкой, левая — цевьё
     // снизу, поэтому линия ладоней — под осью ствола, а не она сама:
     // оружие ставится рукоятью в правую ладонь, чуть ниже, с верхом по телу.
-    const dir = this.body.worldToLocal(this.handL.getWorldPosition(this.v2)).sub(grip)
+    // В прицеле и при выстреле — строго вперёд по телу: тело уже повёрнуто
+    // на цель, а ладони в клипе лежат по диагонали (у кота руки короче
+    // человеческих) и задирали бы ствол на 25° вверх, а в отдаче — в небо.
+    const dir = aiming
+      ? this.v2.set(0, 0, 1)
+      : this.body.worldToLocal(this.handL.getWorldPosition(this.v2)).sub(grip)
     if (dir.lengthSq() < 1e-6) return
     dir.normalize()
     LOOK.lookAt(dir, ZERO, UP)
