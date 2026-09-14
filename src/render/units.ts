@@ -10,7 +10,7 @@ import * as THREE from 'three'
 import type { Dir, Event, Snapshot, UnitSign, UnitView, WorldView } from '../shared/protocol'
 import { Glide } from './glide'
 import { disposeTree } from './kit'
-import { type CharacterKit, type CharacterRig, clip } from './model'
+import { type CharacterKit, type CharacterRig, bone, clip } from './model'
 import { PALETTE } from './palette'
 import { Signs } from './signs'
 
@@ -223,7 +223,7 @@ class StandInFigure implements Figure {
 // Модель из кита
 // --------------------------------------------------------------------------
 
-/** Клипы кита по действию. Имена — контракт с ассетом, `tests/unit-kit.test.ts`. */
+/** Клипы по действию. Имена — контракт с ассетом, `tests/unit-kit.test.ts`. */
 const CLIP_OF: Record<UnitView['action'], string> = {
   idle: 'idle',
   move: 'run',
@@ -231,6 +231,14 @@ const CLIP_OF: Record<UnitView['action'], string> = {
   fire: 'fire',
   dead: 'die',
 }
+
+/**
+ * Свои — Ржавый: тело и голова из кита кота, без пылесоса; покой — его
+ * собственный, бой — клипы Mixamo, перенесённые на его скелет (`cat_*` в
+ * ките юнитов). Противник — Y Bot целиком из кита юнитов.
+ */
+const CAT_PARTS = ['head_rusty', 'body_stocky'] as const
+const CAT_HEIGHT = 1.2
 
 /** Однократные клипы: выстрел отыгрывается и держит последний кадр, смерть — тоже. */
 const ONCE = new Set<UnitView['action']>(['fire', 'dead'])
@@ -255,30 +263,68 @@ function footSpeedOf(clip: THREE.AnimationClip): number | null {
   return typeof v === 'number' && v > 0 ? v : null
 }
 
+/** Ствол в ладони: смещение и поворот в системе кости `RightHand`. */
+interface Gun {
+  x: number
+  y: number
+  z: number
+  rx: number
+  ry: number
+  rz: number
+}
+
+/** У кота ладонь по кости (ось Y — вдоль кости, к пальцам): ствол вперёд по ней. */
+const CAT_GUN: Gun = { x: 0, y: -0.08, z: 0.02, rx: -Math.PI / 2, ry: 0, rz: 0 }
+
 class ModelFigure implements Figure {
   readonly root = new THREE.Group()
   readonly overlay: Overlay
   private readonly body = new THREE.Group()
   private readonly mixer: THREE.AnimationMixer
   private readonly clips = new Map<UnitView['action'], THREE.AnimationAction>()
-  private readonly material: THREE.MeshLambertMaterial
+  private readonly material: THREE.MeshLambertMaterial | null
   private playing: UnitView['action'] | null = null
 
-  constructor(rig: CharacterRig, color: number, signs: Signs) {
+  /**
+   * `clipsOf(action)` — откуда брать клип: у Y Bot всё из одного кита, у
+   * кота покой из своего, бой — из кита юнитов. `color` — плоский цвет
+   * стороны; null — оставить материалы кита (кот раскрашен своей картой).
+   */
+  constructor(
+    rig: CharacterRig,
+    clipOf: (action: UnitView['action']) => THREE.AnimationClip,
+    color: number | null,
+    height: number,
+    signs: Signs,
+    gun: Gun | null,
+  ) {
     this.root.add(this.body)
     this.body.add(rig.root)
-    // Материал кита — один плоский на всех; цвет стороны — свой экземпляр.
-    this.material = new THREE.MeshLambertMaterial({ color })
+    this.material = color === null ? null : new THREE.MeshLambertMaterial({ color })
     rig.root.traverse((o) => {
       if (o instanceof THREE.Mesh) {
-        o.material = this.material
+        if (this.material !== null) o.material = this.material
         o.castShadow = true
       }
     })
 
+    if (gun !== null) {
+      // Ствол — в правой ладони: клипы Mixamo держат винтовку обеими
+      // руками, левая ложится на цевьё сама. Оси — в системе кости.
+      const hand = bone(rig, 'mixamorig:RightHand')
+      const mesh = new THREE.Mesh(
+        new THREE.BoxGeometry(0.05, 0.06, 0.55),
+        new THREE.MeshLambertMaterial({ color: PALETTE.outline }),
+      )
+      mesh.position.set(gun.x, gun.y, gun.z)
+      mesh.rotation.set(gun.rx, gun.ry, gun.rz)
+      mesh.castShadow = true
+      hand.add(mesh)
+    }
+
     this.mixer = new THREE.AnimationMixer(rig.root)
     for (const action of Object.keys(CLIP_OF) as UnitView['action'][]) {
-      const a = this.mixer.clipAction(clip(rig, CLIP_OF[action]))
+      const a = this.mixer.clipAction(clipOf(action))
       if (ONCE.has(action)) {
         a.setLoop(THREE.LoopOnce, 1)
         a.clampWhenFinished = true
@@ -288,7 +334,7 @@ class ModelFigure implements Figure {
       this.clips.set(action, a)
     }
 
-    this.overlay = new Overlay(signs, MODEL_HEIGHT)
+    this.overlay = new Overlay(signs, height)
     this.root.add(this.overlay.bar)
     this.body.add(this.overlay.shield)
   }
@@ -297,7 +343,7 @@ class ModelFigure implements Figure {
   dispose(): void {
     this.mixer.stopAllAction()
     this.mixer.uncacheRoot(this.mixer.getRoot())
-    this.material.dispose()
+    this.material?.dispose()
     this.root.removeFromParent()
   }
 
@@ -360,6 +406,7 @@ export class Units {
   private readonly missMat = new THREE.MeshBasicMaterial({ color: PALETTE.tracer, transparent: true, opacity: 0.5 })
   private readonly signs = new Signs()
   private kit: CharacterKit | null = null
+  private catKit: CharacterKit | null = null
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -374,23 +421,30 @@ export class Units {
    * подмена не выглядит рывком. Мёртвые остаются капсулами: клип смерти
    * с середины боя проигрывать нечему.
    */
-  setKit(kit: CharacterKit): void {
+  setKits(kit: CharacterKit, cat: CharacterKit | null): void {
     this.kit = kit
-    for (const [id, obj] of this.objects) {
+    this.catKit = cat
+    for (const obj of this.objects.values()) {
       if (obj.dead) continue
       obj.figure.dispose()
       obj.figure = this.build(obj.side)
       obj.figure.setYaw(obj.yaw)
       this.root.add(obj.figure.root)
-      void id
     }
   }
 
   private build(side: UnitView['side']): Figure {
     const color = side === 'player' ? PALETTE.ally : PALETTE.foe
-    return this.kit === null
-      ? new StandInFigure(color, this.signs)
-      : new ModelFigure(this.kit.spawn(['unit_body']), color, this.signs)
+    if (this.kit === null) return new StandInFigure(color, this.signs)
+    if (side === 'player' && this.catKit !== null) {
+      const rig = this.catKit.spawn(CAT_PARTS)
+      const combat = this.kit
+      const clipOf = (action: UnitView['action']): THREE.AnimationClip =>
+        action === 'idle' ? clip(rig, 'idle') : combat.clip(`cat_${CLIP_OF[action]}`)
+      return new ModelFigure(rig, clipOf, null, CAT_HEIGHT, this.signs, CAT_GUN)
+    }
+    const rig = this.kit.spawn(['unit_body'])
+    return new ModelFigure(rig, (action) => clip(rig, CLIP_OF[action]), color, MODEL_HEIGHT, this.signs, null)
   }
 
   dispose(): void {

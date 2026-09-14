@@ -155,6 +155,8 @@ export class SceneView {
         (kit) => {
           this.catKit = kit
           this.cats.setKit(kit)
+          // Свои в перестрелке — коты: если кит юнитов уже здесь, пересобрать.
+          if (this.unitKit !== null && this.world.mode === 'skirmish') this.units.setKits(this.unitKit, kit)
         },
         (err: unknown) => console.warn('кит персонажей не загрузился, остаёмся на капсуле', err),
       ),
@@ -268,15 +270,14 @@ export class SceneView {
   private wantUnitKit(): void {
     if (this.world.mode !== 'skirmish') return
     if (this.unitKit !== null) {
-      this.units.setKit(this.unitKit)
+      this.units.setKits(this.unitKit, this.catKit)
       return
     }
-    const units = this.units
     loadUnitKit().then(
       (kit) => {
         this.unitKit = kit
         // Двор мог смениться, пока кит летел: ставить — текущему.
-        if (this.units === units || this.world.mode === 'skirmish') this.units.setKit(kit)
+        if (this.world.mode === 'skirmish') this.units.setKits(kit, this.catKit)
       },
       (err: unknown) => console.warn('кит юнитов не загрузился, бой на капсулах', err),
     )

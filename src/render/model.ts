@@ -112,6 +112,13 @@ export class CharacterKit {
     private readonly clips: THREE.AnimationClip[],
   ) {}
 
+  /** Клип кита по имени, без экземпляра: клипы общие, чужому скелету их можно отдать так. */
+  clip(name: string): THREE.AnimationClip {
+    const found = this.clips.find((c) => c.name === name)
+    if (found === undefined) throw new Error(`в ките нет клипа ${name}`)
+    return found
+  }
+
   static async load(url: string, onProgress?: Progress): Promise<CharacterKit> {
     const gltf = await loader().loadAsync(url, progress(onProgress))
     return new CharacterKit(gltf.scene, gltf.animations)

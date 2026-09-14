@@ -32,6 +32,8 @@ function readJson(): { json: Gltf; bytes: number } {
 const MAX_BYTES = 300 * 1024
 const MAX_TRIS = 2600
 const CLIPS = ['idle', 'run', 'aim', 'fire', 'die']
+/** Те же бои, перенесённые на скелет кота: свои в перестрелке — Ржавый. */
+const CAT_CLIPS = ['cat_run', 'cat_aim', 'cat_fire', 'cat_die']
 
 const present = existsSync(GLB)
 if (!present) console.warn('unit-kit.glb нет — контракт кита юнитов не проверяется (npm run assets:unit)')
@@ -72,6 +74,14 @@ describe.skipIf(!present)('контракт unit-kit.glb', () => {
     for (const c of CLIPS) expect(anims.has(c), `нет клипа ${c}`).toBe(true)
     const run = anims.get('run')!
     expect(run.extras?.foot_speed ?? 0).toBeGreaterThan(0)
+  })
+
+  it('боевые клипы кота — на скелете cat_rig, у cat_run скорость ног', () => {
+    const { json } = data()
+    const anims = new Map((json.animations ?? []).map((a) => [a.name, a]))
+    for (const c of CAT_CLIPS) expect(anims.has(c), `нет клипа ${c}`).toBe(true)
+    expect(anims.get('cat_run')!.extras?.foot_speed ?? 0).toBeGreaterThan(0)
+    expect(json.nodes.some((n) => n.name === 'cat_rig'), 'нет узла cat_rig').toBe(true)
   })
 
   it('без текстур и в бюджете', () => {

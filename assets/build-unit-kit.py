@@ -16,6 +16,13 @@
   которой рендер подбирает timeScale, чтобы ноги не скользили.
 
 Текстур нет: материал один и плоский, цвет стороны кладёт рендер.
+
+Вторая половина кита — те же четыре боевых клипа, перенесённые на скелет
+кота из `assets/rusty.blend`: `cat_run / cat_aim / cat_fire / cat_die`. Свои
+в перестрелке — Ржавый, и стрелять он должен позами Mixamo, а не пылесосить.
+Скелет кота Mixamo-совместим по именам, но не по rest-позе (руки в A-позе,
+нет Spine2 и пальцев), поэтому перенос — через мировые дельты поворотов с
+выравниванием направлений костей, а не копированием локальных кватернионов.
 """
 
 import glob
@@ -23,11 +30,16 @@ import os
 import sys
 
 import bpy
+from mathutils import Matrix, Vector
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(ROOT, "assets", "mixamo", "unit")
 BLEND = os.path.join(ROOT, "assets", "unit.blend")
 GLB = os.path.join(ROOT, "public", "models", "unit-kit.glb")
+CAT_BLEND = os.path.join(ROOT, "assets", "rusty.blend")
+CAT_RIG = "rusty_rig"
+# Клипы, которые переносятся на кота. Idle у кота свой, из его кита.
+CAT_CLIPS = ("run", "aim", "fire", "die")
 
 RIG = "mixamorig:"
 FPS = 30
@@ -233,6 +245,159 @@ def adopt(rig, path, name, loop):
     strip.action_frame_start, strip.action_frame_end = first, last
     track.mute = True
     log(f"клип {name}: {(last - first) / FPS:.2f} с{'' if loop else ', однократный'}")
+    return act
+
+
+# --------------------------------------------------------------------------
+# Перенос на кота
+# --------------------------------------------------------------------------
+
+def append_cat_rig():
+    """Скелет кота из эталона — без мешей и без его клипов: они в его ките."""
+    if not os.path.exists(CAT_BLEND):
+        sys.exit(f"нет {CAT_BLEND}: сначала npm run assets (кит кота)")
+    before = set(bpy.data.objects)
+    bpy.ops.wm.append(
+        filepath=os.path.join(CAT_BLEND, "Object", CAT_RIG),
+        directory=os.path.join(CAT_BLEND, "Object"),
+        filename=CAT_RIG,
+    )
+    rigs = [o for o in bpy.data.objects if o not in before and o.type == "ARMATURE"]
+    if len(rigs) != 1:
+        sys.exit(f"в {CAT_BLEND} не нашлась арматура {CAT_RIG}")
+    rig = rigs[0]
+    rig.name = "cat_rig"
+    # Клипы кота приехали вместе с NLA — снять, иначе экспорт положит их в
+    # кит юнитов под теми же именами, что у Y Bot.
+    old = set()
+    if rig.animation_data is not None:
+        for t in rig.animation_data.nla_tracks:
+            for st in t.strips:
+                if st.action is not None:
+                    old.add(st.action)
+        rig.animation_data_clear()
+    for act in old:
+        if act.users == 0 or act.use_fake_user:
+            bpy.data.actions.remove(act)
+    rig.location = (0.0, 0.0, 0.0)
+    bpy.context.view_layer.update()
+    return rig
+
+
+def rot3(m):
+    return m.to_3x3().normalized()
+
+
+def retarget(src, src_act, dst, name, first, last, scale):
+    """Клип `src_act` со скелета `src` — на скелет `dst`, экшеном `name`.
+
+    Для каждой кости-тёзки: мировая дельта поворота источника от его
+    rest-позы применяется к rest-позе приёмника, предварительно повёрнутой
+    так, чтобы направление кости совпало с источником (A-поза → T-поза).
+    Пропущенные в приёмнике кости (Spine2, пальцы) не теряются: дельта
+    мировая, потомок несёт её в себе. Бёдра переносят и смещение — в
+    масштабе роста.
+    """
+    ad = src.animation_data
+    ad.action = src_act
+    if hasattr(ad, "action_slot") and ad.action_slot is None:
+        ad.action_slot = src_act.slots[0]
+
+    act = bpy.data.actions.new(name)
+    act.use_fake_user = True
+    dad = dst.animation_data or dst.animation_data_create()
+    dad.action = act
+    if hasattr(dad, "action_slot") and dad.action_slot is None:
+        dad.action_slot = act.slots.new(id_type="OBJECT", name=dst.name)
+
+    src_world = src.matrix_world
+    dst_world = dst.matrix_world
+    dst_world_inv = dst_world.inverted()
+    pairs = []
+    # Порядок — родители раньше детей: поза потомка считается от позы родителя.
+    for bone in dst.data.bones:
+        if bone.name not in src.data.bones:
+            continue
+        depth = 0
+        p = bone.parent
+        while p is not None:
+            depth += 1
+            p = p.parent
+        pairs.append((depth, bone.name))
+    pairs.sort()
+    names = [n for _, n in pairs]
+
+    corr = {}
+    for n in names:
+        sb = src.data.bones[n]
+        db = dst.data.bones[n]
+        d_src = (rot3(src_world) @ (sb.tail_local - sb.head_local)).normalized()
+        d_dst = (rot3(dst_world) @ (db.tail_local - db.head_local)).normalized()
+        corr[n] = d_dst.rotation_difference(d_src).to_matrix()
+
+    hips = RIG + "Hips"
+    src_hips_rest = (src_world @ src.data.bones[hips].matrix_local).to_translation()
+    dst_hips_rest = (dst_world @ dst.data.bones[hips].matrix_local).to_translation()
+
+    for f in range(int(first), int(last) + 1):
+        bpy.context.scene.frame_set(f)
+        pose = {}
+        for n in names:
+            sb = src.data.bones[n]
+            spb = src.pose.bones[n]
+            db = dst.data.bones[n]
+            dpb = dst.pose.bones[n]
+
+            delta = rot3(src_world @ spb.matrix) @ rot3(src_world @ sb.matrix_local).inverted()
+            target_rot = delta @ corr[n] @ rot3(dst_world @ db.matrix_local)
+            target_arm = (rot3(dst_world_inv) @ target_rot).to_4x4()
+
+            if db.parent is None or db.parent.name not in pose:
+                base = db.matrix_local.copy()
+            else:
+                base = pose[db.parent.name] @ (db.parent.matrix_local.inverted() @ db.matrix_local)
+            if n == hips:
+                moved = (src_world @ spb.matrix).to_translation() - src_hips_rest
+                target_arm.translation = dst_world_inv @ (dst_hips_rest + moved * scale)
+            else:
+                target_arm.translation = base.to_translation()
+            pose[n] = target_arm
+
+            basis = base.inverted() @ target_arm
+            dpb.rotation_mode = "QUATERNION"
+            dpb.rotation_quaternion = basis.to_quaternion()
+            dpb.keyframe_insert("rotation_quaternion", frame=f)
+            if n == hips:
+                dpb.location = basis.to_translation()
+                dpb.keyframe_insert("location", frame=f)
+
+    ad.action = None
+    dad.action = None
+    for pb in dst.pose.bones:
+        pb.rotation_quaternion = (1.0, 0.0, 0.0, 0.0)
+        pb.location = (0.0, 0.0, 0.0)
+    return act
+
+
+def cat_clips(unit_rig, cat, clip_actions, unit_height):
+    """Четыре боевых клипа — на кота, полосами NLA `cat_*`."""
+    cat_h = max((cat.matrix_world @ b.tail_local).z for b in cat.data.bones)
+    scale = cat_h / unit_height
+    dad = cat.animation_data or cat.animation_data_create()
+    for name in CAT_CLIPS:
+        src_act = clip_actions[name]
+        first, last = src_act.frame_range
+        act = retarget(unit_rig, src_act, cat, f"cat_{name}", first, last, scale)
+        if name == "run":
+            act["foot_speed"] = foot_speed(cat, act, first, last)
+            log(f"cat_run: ноги {act['foot_speed']:.2f} ед/с")
+        track = dad.nla_tracks.new()
+        track.name = f"cat_{name}"
+        strip = track.strips.new(f"cat_{name}", int(first), act)
+        strip.action_frame_start, strip.action_frame_end = first, last
+        track.mute = True
+        log(f"клип cat_{name}: перенесён")
+    dad.action = None
 
 
 def main():
@@ -266,10 +431,13 @@ def main():
     body = one_mesh(meshes, rig)
     decimate(body)
 
+    actions = {}
     for name, (path, loop) in clip_files.items():
-        adopt(rig, path, name, loop)
+        actions[name] = adopt(rig, path, name, loop)
 
     log(f"юнит: {tris_of(body)} тр.")
+    cat = append_cat_rig()
+    cat_clips(rig, cat, actions, HEIGHT)
     os.makedirs(os.path.dirname(GLB), exist_ok=True)
     bpy.ops.wm.save_as_mainfile(filepath=BLEND)
     bpy.ops.export_scene.gltf(
