@@ -307,8 +307,8 @@ class ModelFigure implements Figure {
   private readonly handL: THREE.Object3D | null
   private readonly armL: THREE.Object3D | null
   private readonly foreArmL: THREE.Object3D | null
-  /** Где на оружии лежит левая ладонь: вперёд от рукояти, м. */
-  private readonly hold: number
+  /** Где на оружии лежит левая ладонь, в осях оружия. */
+  private readonly hold: THREE.Vector3
   private readonly v1 = new THREE.Vector3()
   private readonly v2 = new THREE.Vector3()
   private readonly v3 = new THREE.Vector3()
@@ -347,7 +347,7 @@ class ModelFigure implements Figure {
         stub.castShadow = true
         this.gun = stub
         this.gunAhead = GUN_AHEAD
-        this.hold = GUN_AHEAD + GUN_LENGTH * 0.2
+        this.hold = new THREE.Vector3(0, -0.02, GUN_AHEAD + GUN_LENGTH * 0.2)
       } else {
         this.gun = gun
         this.gunAhead = 0
@@ -363,7 +363,7 @@ class ModelFigure implements Figure {
     } else {
       this.gun = null
       this.gunAhead = 0
-      this.hold = 0
+      this.hold = new THREE.Vector3()
       this.handR = this.handL = this.armL = this.foreArmL = null
     }
 
@@ -429,28 +429,32 @@ class ModelFigure implements Figure {
     if (this.gun === null || this.handR === null || this.handL === null) return
     this.body.updateWorldMatrix(true, true)
     const grip = this.body.worldToLocal(this.handR.getWorldPosition(this.v1))
-    // Все клипы кита — «с винтовкой»: и в покое, и на бегу обе ладони на
-    // оружии, ствол — от правой к левой. Раньше покой шёл по фиксированному
-    // направлению «на ремне»: у перенесённых клипов рука висела где попало.
+    // Все клипы кита — «с винтовкой»: обе ладони на оружии, ствол — от
+    // правой к левой. Правая держит рукоять под коробкой, левая — цевьё
+    // снизу, поэтому линия ладоней — под осью ствола, а не она сама:
+    // оружие ставится рукоятью в правую ладонь, чуть ниже, с верхом по телу.
     const dir = this.body.worldToLocal(this.handL.getWorldPosition(this.v2)).sub(grip)
-    const span = dir.length()
-    if (span < 1e-3) return
-    dir.divideScalar(span)
-    this.gun.position.copy(grip).addScaledVector(dir, this.gunAhead)
-    this.gun.quaternion.setFromUnitVectors(FORWARD, dir)
+    if (dir.lengthSq() < 1e-6) return
+    dir.normalize()
+    LOOK.lookAt(dir, ZERO, UP)
+    this.gun.quaternion.setFromRotationMatrix(LOOK)
+    this.gun.position.copy(grip).addScaledVector(dir, this.gunAhead).addScaledVector(UP, -GUN_DROP)
     if (this.armL === null || this.foreArmL === null) return
-    // Левая ладонь — на цевьё: IK кладёт кисть на линию ствола. Но не дальше,
-    // чем её держит клип: в покое ладони близко, и тянуть кисть к цевью
-    // короткого автомата значило бы вытянуть руку в струну.
-    // `dir` живёт в v2 — цель считается в своём векторе, иначе она затрёт направление.
-    const target = this.body.localToWorld(this.v3.copy(grip).addScaledVector(dir, Math.min(this.hold, span)))
+    // Левая ладонь — на цевьё, IK дотягивает кисть: клипы кладут её рядом
+    // с оружием, но не на него. Цель — в осях оружия, значит и под стволом.
+    // Не localToWorld оружия: узел масштабирован, а `hold` — в метрах.
+    const target = this.body.localToWorld(this.v3.copy(this.hold).applyQuaternion(this.gun.quaternion).add(this.gun.position))
     reach(this.armL, this.foreArmL, this.handL, target, DOWN)
   }
 }
 
+/** Оружие держится ниже ладони: рука на рукояти выше её низа, коробка — над рукой. */
+const GUN_DROP = 0.03
+const ZERO = new THREE.Vector3()
+const UP = new THREE.Vector3(0, 1, 0)
+const LOOK = new THREE.Matrix4()
 const DOWN = new THREE.Vector3(0, -1, 0)
 
-const FORWARD = new THREE.Vector3(0, 0, 1)
 
 interface UnitObject {
   figure: Figure
