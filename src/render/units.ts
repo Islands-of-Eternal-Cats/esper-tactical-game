@@ -306,7 +306,6 @@ class ModelFigure implements Figure {
   private readonly gunAhead: number
   private readonly handR: THREE.Object3D | null
   private readonly handL: THREE.Object3D | null
-  private readonly foreArmR: THREE.Object3D | null
   private readonly v1 = new THREE.Vector3()
   private readonly v2 = new THREE.Vector3()
 
@@ -353,11 +352,10 @@ class ModelFigure implements Figure {
       // их не костями, а простыми узлами — ищутся по имени в иерархии.
       this.handR = joint(rig, 'mixamorig:RightHand')
       this.handL = joint(rig, 'mixamorig:LeftHand')
-      this.foreArmR = joint(rig, 'mixamorig:RightForeArm')
     } else {
       this.gun = null
       this.gunAhead = 0
-      this.handR = this.handL = this.foreArmR = null
+      this.handR = this.handL = null
     }
 
     this.mixer = new THREE.AnimationMixer(rig.root)
@@ -419,14 +417,15 @@ class ModelFigure implements Figure {
   }
 
   private placeGun(action: UnitView['action']): void {
-    if (this.gun === null || this.handR === null || this.handL === null || this.foreArmR === null) return
+    if (this.gun === null || this.handR === null || this.handL === null) return
     this.body.updateWorldMatrix(true, true)
     const grip = this.body.worldToLocal(this.handR.getWorldPosition(this.v1))
     const twoHanded = action === 'aim' || action === 'fire'
-    const other = this.body.worldToLocal((twoHanded ? this.handL : this.foreArmR).getWorldPosition(this.v2))
-    // Направление: к левой ладони, когда обе на винтовке; иначе от локтя к
-    // ладони — ружьё висит вдоль предплечья, стволом вниз.
-    const dir = twoHanded ? other.sub(grip) : grip.clone().sub(other)
+    // В прицеле — к левой ладони: обе на оружии. В покое и на бегу
+    // предплечье в клипах ходит как угодно (у кота на колене — вверх), и
+    // ствол за ним задирался в небо: направление берётся не от кости, а
+    // фиксированное в осях тела — вперёд и вниз, как носят на ремне.
+    const dir = twoHanded ? this.body.worldToLocal(this.handL.getWorldPosition(this.v2)).sub(grip) : this.v2.copy(CARRY)
     if (dir.lengthSq() < 1e-6) return
     dir.normalize()
     this.gun.position.copy(grip).addScaledVector(dir, this.gunAhead)
@@ -434,6 +433,8 @@ class ModelFigure implements Figure {
   }
 }
 
+/** Ствол в покое: вперёд по телу (+Z), вниз на ~35° и чуть влево, поперёк груди. */
+const CARRY = new THREE.Vector3(-0.25, -0.7, 1).normalize()
 const FORWARD = new THREE.Vector3(0, 0, 1)
 
 interface UnitObject {
