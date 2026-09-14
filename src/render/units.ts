@@ -10,7 +10,8 @@ import * as THREE from 'three'
 import type { Dir, Event, Snapshot, UnitSign, UnitView, WorldView } from '../shared/protocol'
 import { Glide } from './glide'
 import { disposeTree } from './kit'
-import { type CharacterKit, type CharacterRig, bone, clip } from './model'
+import { assembleGun } from './guns'
+import { type CharacterKit, type CharacterRig, type GunKit, clip, joint } from './model'
 import { PALETTE } from './palette'
 import { Signs } from './signs'
 import { audio } from './audio'
@@ -300,10 +301,12 @@ class ModelFigure implements Figure {
   private readonly clips = new Map<UnitView['action'], THREE.AnimationAction>()
   private readonly material: THREE.MeshLambertMaterial | null
   private playing: UnitView['action'] | null = null
-  private readonly gun: THREE.Mesh | null
-  private readonly handR: THREE.Bone | null
-  private readonly handL: THREE.Bone | null
-  private readonly foreArmR: THREE.Bone | null
+  private readonly gun: THREE.Object3D | null
+  /** Насколько начало координат модели оружия впереди ладони: у бруска — его центр. */
+  private readonly gunAhead: number
+  private readonly handR: THREE.Object3D | null
+  private readonly handL: THREE.Object3D | null
+  private readonly foreArmR: THREE.Object3D | null
   private readonly v1 = new THREE.Vector3()
   private readonly v2 = new THREE.Vector3()
 
@@ -311,6 +314,8 @@ class ModelFigure implements Figure {
    * `clipsOf(action)` — откуда брать клип: у Y Bot всё из одного кита, у
    * кота покой из своего, бой — из кита юнитов. `color` — плоский цвет
    * стороны; null — оставить материалы кита (кот раскрашен своей картой).
+   * `gun` — модель из кита оружия с рукоятью в начале координат; `'stub'` —
+   * брусок до кита; null — безоружный.
    */
   constructor(
     rig: CharacterRig,
@@ -318,7 +323,7 @@ class ModelFigure implements Figure {
     color: number | null,
     height: number,
     signs: Signs,
-    armed: boolean,
+    gun: THREE.Object3D | 'stub' | null,
   ) {
     this.root.add(this.body)
     this.body.add(rig.root)
@@ -330,18 +335,28 @@ class ModelFigure implements Figure {
       }
     })
 
-    if (armed) {
-      this.gun = new THREE.Mesh(
-        new THREE.BoxGeometry(0.035, 0.05, GUN_LENGTH),
-        new THREE.MeshLambertMaterial({ color: PALETTE.hose }),
-      )
-      this.gun.castShadow = true
+    if (gun !== null) {
+      if (gun === 'stub') {
+        const stub = new THREE.Mesh(
+          new THREE.BoxGeometry(0.035, 0.05, GUN_LENGTH),
+          new THREE.MeshLambertMaterial({ color: PALETTE.hose }),
+        )
+        stub.castShadow = true
+        this.gun = stub
+        this.gunAhead = GUN_AHEAD
+      } else {
+        this.gun = gun
+        this.gunAhead = 0
+      }
       this.body.add(this.gun)
-      this.handR = bone(rig, 'mixamorig:RightHand')
-      this.handL = bone(rig, 'mixamorig:LeftHand')
-      this.foreArmR = bone(rig, 'mixamorig:RightForeArm')
+      // Не `bone()`: у Y Bot кисти и пальцы без весов, и загрузчик делает
+      // их не костями, а простыми узлами — ищутся по имени в иерархии.
+      this.handR = joint(rig, 'mixamorig:RightHand')
+      this.handL = joint(rig, 'mixamorig:LeftHand')
+      this.foreArmR = joint(rig, 'mixamorig:RightForeArm')
     } else {
       this.gun = null
+      this.gunAhead = 0
       this.handR = this.handL = this.foreArmR = null
     }
 
@@ -414,7 +429,7 @@ class ModelFigure implements Figure {
     const dir = twoHanded ? other.sub(grip) : grip.clone().sub(other)
     if (dir.lengthSq() < 1e-6) return
     dir.normalize()
-    this.gun.position.copy(grip).addScaledVector(dir, GUN_AHEAD)
+    this.gun.position.copy(grip).addScaledVector(dir, this.gunAhead)
     this.gun.quaternion.setFromUnitVectors(FORWARD, dir)
   }
 }
@@ -424,6 +439,7 @@ const FORWARD = new THREE.Vector3(0, 0, 1)
 interface UnitObject {
   figure: Figure
   side: UnitView['side']
+  weapon: string
   yaw: number
   /** Умер капсулой — и остаётся ею, даже когда кит приехал. */
   dead: boolean
@@ -458,6 +474,7 @@ export class Units {
   private readonly signs = new Signs()
   private kit: CharacterKit | null = null
   private catKit: CharacterKit | null = null
+  private gunKit: GunKit | null = null
 
   /** Занятые клетки двора — стены, пропсы, контейнер: куда трупу не лечь. */
   private readonly solid = new Set<number>()
@@ -512,19 +529,27 @@ export class Units {
    * подмена не выглядит рывком. Мёртвые остаются капсулами: клип смерти
    * с середины боя проигрывать нечему.
    */
-  setKits(kit: CharacterKit, cat: CharacterKit | null): void {
+  setKits(kit: CharacterKit, cat: CharacterKit | null, guns: GunKit | null): void {
     this.kit = kit
     this.catKit = cat
+    this.gunKit = guns
     for (const obj of this.objects.values()) {
       if (obj.dead) continue
       obj.figure.dispose()
-      obj.figure = this.build(obj.side)
+      obj.figure = this.build(obj.side, obj.weapon)
       obj.figure.setYaw(obj.yaw)
       this.root.add(obj.figure.root)
     }
   }
 
-  private build(side: UnitView['side']): Figure {
+  /** Оружие по id из двора: модель из кита, пока кита нет — брусок. */
+  private gun(weapon: string): THREE.Object3D | 'stub' {
+    const w = this.world.weapons[weapon]
+    if (this.gunKit === null || w === undefined) return 'stub'
+    return assembleGun(this.gunKit, w.look)
+  }
+
+  private build(side: UnitView['side'], weapon: string): Figure {
     const color = side === 'player' ? PALETTE.ally : PALETTE.foe
     if (this.kit === null) return new StandInFigure(color, this.signs)
     if (side === 'player' && this.catKit !== null) {
@@ -532,12 +557,12 @@ export class Units {
       const combat = this.kit
       const clipOf = (action: UnitView['action']): THREE.AnimationClip =>
         action === 'idle' ? clip(rig, 'idle') : combat.clip(`cat_${CLIP_OF[action]}`)
-      return new ModelFigure(rig, clipOf, null, CAT_HEIGHT, this.signs, true)
+      return new ModelFigure(rig, clipOf, null, CAT_HEIGHT, this.signs, this.gun(weapon))
     }
     const rig = this.kit.spawn(['unit_body'])
     // Кит юнитов несёт и скелет кота (для его боевых клипов): Y Bot он не нужен.
     rig.root.getObjectByName('cat_rig')?.removeFromParent()
-    return new ModelFigure(rig, (action) => clip(rig, CLIP_OF[action]), color, MODEL_HEIGHT, this.signs, false)
+    return new ModelFigure(rig, (action) => clip(rig, CLIP_OF[action]), color, MODEL_HEIGHT, this.signs, this.gun(weapon))
   }
 
   dispose(): void {
@@ -569,7 +594,14 @@ export class Units {
       let obj = this.objects.get(view.id)
       if (obj === undefined) {
         const [hx, hz] = HEADING[view.facing]
-        obj = { figure: this.build(view.side), side: view.side, yaw: Math.atan2(hx, hz), dead: false, walked: 0 }
+        obj = {
+          figure: this.build(view.side, view.weapon),
+          side: view.side,
+          weapon: view.weapon,
+          yaw: Math.atan2(hx, hz),
+          dead: false,
+          walked: 0,
+        }
         this.objects.set(view.id, obj)
         this.root.add(obj.figure.root)
       }

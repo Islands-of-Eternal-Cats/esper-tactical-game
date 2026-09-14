@@ -5,6 +5,7 @@
  * опечатка в конфиге падала при старте, а не всплывала как NaN в шансе.
  */
 
+import type { WeaponLook } from '../shared/protocol'
 import raw from './weapons.yaml'
 import { SIGHT_RANGE } from './tuning'
 
@@ -23,6 +24,8 @@ export interface Weapon {
   readonly burst: number
   /** Пауза между выстрелами внутри очереди; reloadMs — после неё. */
   readonly burstMs: number
+  /** Части модели по гнёздам; ядро их не трогает, только передаёт рендеру. */
+  readonly look: WeaponLook
 }
 
 const FIELDS = ['fireRange', 'aimMs', 'reloadMs', 'fireMs', 'hitBase', 'hitPerCell', 'coverMul', 'damage'] as const
@@ -55,6 +58,12 @@ function parse(id: string, entry: unknown): Weapon {
   if (typeof burst !== 'number' || !Number.isInteger(burst) || burst < 1) fail(id, 'burst — целое ≥ 1')
   if (typeof burstMs !== 'number' || !Number.isInteger(burstMs)) fail(id, 'burstMs должно быть целым')
   if (burst > 1 && (burstMs < n('fireMs') || burstMs > n('reloadMs'))) fail(id, 'burstMs вне fireMs..reloadMs')
+  const look = e.look
+  if (typeof look !== 'object' || look === null) fail(id, 'нет look')
+  for (const [slot, part] of Object.entries(look)) {
+    if (typeof part !== 'string' || part === '') fail(id, `look.${slot} должно быть именем части`)
+  }
+  if (typeof (look as Record<string, unknown>).body !== 'string') fail(id, 'look.body обязателен')
   return {
     id,
     name: e.name,
@@ -68,6 +77,7 @@ function parse(id: string, entry: unknown): Weapon {
     damage: n('damage'),
     burst,
     burstMs,
+    look: { ...(look as WeaponLook) },
   }
 }
 

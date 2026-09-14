@@ -14,3 +14,7 @@ assets/mixamo/**/*.fbx
 assets/mixamo/**/*.FBX
 assets/unit.blend
 assets/unit.blend1
+
+# Набор Quaternius (CC0, 62 МБ): качается с quaternius.com, в кит идут только части из build-gun-kit.py
+assets/guns/Modular*
+assets/guns/preview/

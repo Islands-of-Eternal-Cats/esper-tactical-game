@@ -25,7 +25,7 @@ import {
   WALK_MS_PER_CELL,
 } from './tuning'
 import { alive, orderHalt, orderMove, signOf, threatOf, tickUnits } from './units'
-import { weaponOf } from './weapons'
+import { WEAPONS, weaponOf } from './weapons'
 import { coverFrom } from './los'
 import { CONTAINER, buildGrid, placePiles } from './world'
 
@@ -490,6 +490,7 @@ export class Sim {
       walls: s.walls.map((c) => ({ ...c })),
       props: s.props.map((p) => ({ ...p, cell: { ...p.cell } })),
       container: { ...s.container },
+      weapons: Object.fromEntries([...WEAPONS.values()].map((w) => [w.id, { name: w.name, look: { ...w.look } }])),
     }
   }
 

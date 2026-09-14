@@ -11,6 +11,10 @@
 #   hitPerCell — прибавка к шансу на клетку дальности (отрицательная)
 #   coverMul   — множитель шанса по укрытому
 #   damage     — снимает здоровья за попадание (HP в tuning.ts)
+#   look       — из чего собрана модель: части кита gun-kit.glb по гнёздам
+#                корпуса (assets/build-gun-kit.py). body обязателен, остальные
+#                гнёзда — barrel / stock / grip / magazine / top (обвес),
+#                у снайперской ещё front. Пустое гнездо — пустое.
 #   burst      — выстрелов в очереди (необязательно, 1 — одиночный)
 #   burstMs    — между выстрелами внутри очереди, fireMs..reloadMs
 #
@@ -27,6 +31,13 @@ rifle:
   hitPerCell: -40
   coverMul: 400
   damage: 1
+  look:
+    body: Body_AR_1
+    barrel: Barrel_AR_1
+    stock: Stock_AR_1
+    grip: Grip_AR_1
+    magazine: Magazine_AR
+    top: Sight_1
 
 smg:
   name: автомат
@@ -40,6 +51,12 @@ smg:
   damage: 1
   burst: 3
   burstMs: 130
+  look:
+    body: Body_SMG_1
+    barrel: Barrel_Single
+    stock: Stock_SMG_1
+    grip: Grip_SMG_1
+    magazine: Magazine_SMG_1
 
 shotgun:
   name: дробовик
@@ -51,6 +68,11 @@ shotgun:
   hitPerCell: -150
   coverMul: 300
   damage: 2
+  look:
+    body: Body_Grenade_2
+    barrel: Barrel_Grenade_1
+    stock: Stock_Grenade_2
+    grip: Grip_Grenade_2
 
 sniper:
   name: снайперская
@@ -62,3 +84,11 @@ sniper:
   hitPerCell: -20
   coverMul: 600
   damage: 2
+  look:
+    body: Body_Sniper_1
+    front: Body_Front_Sniper_1
+    barrel: Barrel_Sniper_1
+    stock: Stock_Sniper_1
+    grip: Grip_Sniper_1
+    magazine: Magazine_Sniper_1
+    top: Scope_1

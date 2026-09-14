@@ -162,6 +162,22 @@ export function clip(rig: CharacterRig, name: string): THREE.AnimationClip {
   return found
 }
 
+/**
+ * Узел скелета по имени, кость он или нет: сустав без весов загрузчик
+ * приносит простым Object3D, и в `bones` его нет. Два скелета в одном файле
+ * зовутся одинаково, и второму загрузчик дописывает `_1`: ищется и так.
+ */
+export function joint(rig: CharacterRig, name: string): THREE.Object3D {
+  const base = sanitize(name)
+  const re = new RegExp(`^${base}(_\\d+)?$`)
+  let found: THREE.Object3D | undefined
+  rig.root.traverse((o) => {
+    if (found === undefined && (o.name === name || re.test(o.name))) found = o
+  })
+  if (found === undefined) throw new Error(`в ките нет узла ${name}`)
+  return found
+}
+
 /** Кость по имени из контракта. Отсутствие — поломка ассета, а не вариант. */
 export function bone(rig: CharacterRig, name: string): THREE.Bone {
   const found = rig.bones.get(name) ?? rig.bones.get(sanitize(name))
@@ -202,6 +218,71 @@ export const MODULES = [
   'prop_pipe_joint',
 ] as const
 
+/**
+ * Меши кита по имени ближайшего именованного предка: gltfpack держит имена
+ * узлов, а меши раскладывает под ними безымянными узлами — по одному на
+ * материал, с квантованием в трансформации. Геометрия запекается
+ * относительно именованного узла: рендер инстансирует её своими матрицами
+ * и этих узлов не видит.
+ */
+function bakeNamed(scene: THREE.Object3D): Map<string, THREE.Mesh[]> {
+  const meshes = new Map<string, THREE.Mesh[]>()
+  const local = new THREE.Matrix4()
+  // Одинаковые меши gltfpack сводит в один, и загрузчик делит геометрию
+  // между узлами: запечь её дважды — значит умножить квантование дважды.
+  // Первому достаётся оригинал, остальным — копии нетронутого.
+  const pristine = new Map<THREE.BufferGeometry, THREE.BufferGeometry>()
+  scene.traverse((o) => {
+    if (!(o instanceof THREE.Mesh)) return
+    const shared = pristine.get(o.geometry)
+    if (shared !== undefined) o.geometry = shared.clone()
+    else pristine.set(o.geometry, o.geometry.clone())
+    // Квантованные позиции — целые int16; умножить их на матрицу
+    // на месте нельзя, результат не влезет обратно. Переводим в float.
+    const pos = o.geometry.getAttribute('position') as THREE.BufferAttribute
+    if (!(pos.array instanceof Float32Array)) {
+      const f = new Float32Array(pos.count * 3)
+      for (let i = 0; i < pos.count; i++) {
+        f[i * 3] = pos.getX(i)
+        f[i * 3 + 1] = pos.getY(i)
+        f[i * 3 + 2] = pos.getZ(i)
+      }
+      o.geometry.setAttribute('position', new THREE.BufferAttribute(f, 3))
+    }
+    local.identity()
+    let node: THREE.Object3D = o
+    while (node.parent !== null && node.parent !== scene && unnamed(node)) {
+      node.updateMatrix()
+      local.premultiply(node.matrix)
+      node = node.parent
+    }
+    if (node === o) {
+      o.updateMatrix()
+      local.copy(o.matrix)
+    }
+    o.geometry.applyMatrix4(local)
+    const list = meshes.get(node.name) ?? []
+    list.push(o)
+    meshes.set(node.name, list)
+  })
+  return meshes
+}
+
+/** Примитивы одного узла — в одну геометрию с группами граней: InstancedMesh это умеет. */
+function mergeParts(meshes: Map<string, THREE.Mesh[]>): Map<string, EnvPart> {
+  const parts = new Map<string, EnvPart>()
+  for (const [name, list] of meshes) {
+    if (list.length === 1) {
+      parts.set(name, { geometry: list[0]!.geometry, material: list[0]!.material as THREE.Material })
+      continue
+    }
+    const geometry = mergeGeometries(list.map((m) => m.geometry), true)
+    if (geometry === null) throw new Error(`не сшиваются примитивы ${name}`)
+    parts.set(name, { geometry, material: list.map((m) => m.material as THREE.Material) })
+  }
+  return parts
+}
+
 export interface EnvPart {
   geometry: THREE.BufferGeometry
   material: THREE.Material | THREE.Material[]
@@ -221,50 +302,7 @@ export class EnvKit {
 
   static async load(onProgress?: Progress): Promise<EnvKit> {
     const gltf = await loader().loadAsync(URL_ENV, progress(onProgress))
-    // Имя модуля — имя ближайшего именованного предка: gltfpack держит
-    // имена узлов, а меши раскладывает под ними безымянными узлами —
-    // по одному на материал, с квантованием в трансформации. Геометрия
-    // запекается относительно именованного узла: рендер инстансирует её
-    // своими матрицами и этих узлов не видит.
-    const meshes = new Map<string, THREE.Mesh[]>()
-    const local = new THREE.Matrix4()
-    // Одинаковые меши gltfpack сводит в один, и загрузчик делит геометрию
-    // между узлами: запечь её дважды — значит умножить квантование дважды.
-    // Первому достаётся оригинал, остальным — копии нетронутого.
-    const pristine = new Map<THREE.BufferGeometry, THREE.BufferGeometry>()
-    gltf.scene.traverse((o) => {
-      if (!(o instanceof THREE.Mesh)) return
-      const shared = pristine.get(o.geometry)
-      if (shared !== undefined) o.geometry = shared.clone()
-      else pristine.set(o.geometry, o.geometry.clone())
-      // Квантованные позиции — целые int16; умножить их на матрицу
-      // на месте нельзя, результат не влезет обратно. Переводим в float.
-      const pos = o.geometry.getAttribute('position') as THREE.BufferAttribute
-      if (!(pos.array instanceof Float32Array)) {
-        const f = new Float32Array(pos.count * 3)
-        for (let i = 0; i < pos.count; i++) {
-          f[i * 3] = pos.getX(i)
-          f[i * 3 + 1] = pos.getY(i)
-          f[i * 3 + 2] = pos.getZ(i)
-        }
-        o.geometry.setAttribute('position', new THREE.BufferAttribute(f, 3))
-      }
-      local.identity()
-      let node: THREE.Object3D = o
-      while (node.parent !== null && node.parent !== gltf.scene && unnamed(node)) {
-        node.updateMatrix()
-        local.premultiply(node.matrix)
-        node = node.parent
-      }
-      if (node === o) {
-        o.updateMatrix()
-        local.copy(o.matrix)
-      }
-      o.geometry.applyMatrix4(local)
-      const list = meshes.get(node.name) ?? []
-      list.push(o)
-      meshes.set(node.name, list)
-    })
+    const meshes = bakeNamed(gltf.scene)
     // Бетон, асфальт и стены — шейдером по мировой координате, не картинкой.
     // Материалы в ките общие, править каждый достаточно один раз.
     const patched = new Set<THREE.Material>()
@@ -278,16 +316,7 @@ export class EnvKit {
         else if (mat.name === 'wall') proceduralWall(mat)
       }
     }
-    const parts = new Map<string, EnvPart>()
-    for (const [name, list] of meshes) {
-      if (list.length === 1) {
-        parts.set(name, { geometry: list[0]!.geometry, material: list[0]!.material as THREE.Material })
-        continue
-      }
-      const geometry = mergeGeometries(list.map((m) => m.geometry), true)
-      if (geometry === null) throw new Error(`не сшиваются примитивы ${name}`)
-      parts.set(name, { geometry, material: list.map((m) => m.material as THREE.Material) })
-    }
+    const parts = mergeParts(meshes)
     for (const name of [...DEBRIS, ...MODULES]) {
       if (!parts.has(name)) throw new Error(`в ките окружения нет ${name}`)
     }
@@ -300,4 +329,51 @@ export class EnvKit {
     if (part === undefined) throw new Error(`в ките окружения нет ${name}`)
     return part
   }
+}
+
+const URL_GUN = `${import.meta.env.BASE_URL}models/gun-kit.glb`
+
+/** Гнёзда корпуса: имя гнезда → смещение части в осях корпуса. */
+export type Sockets = Record<string, readonly [number, number, number]>
+
+/**
+ * Кит оружия: части по именам `gun_<имя>` и гнёзда корпусов из extras
+ * (`assets/build-gun-kit.py`). Как и кит юнитов — по требованию, при первом
+ * входе в перестрелку; без него винтовка остаётся бруском.
+ */
+export class GunKit {
+  private constructor(
+    private readonly parts: Map<string, EnvPart>,
+    private readonly sockets: Map<string, Sockets>,
+  ) {}
+
+  static async load(): Promise<GunKit> {
+    const gltf = await loader().loadAsync(URL_GUN)
+    const sockets = new Map<string, Sockets>()
+    gltf.scene.traverse((o) => {
+      const s: unknown = (o.userData as Record<string, unknown>)['sockets']
+      if (typeof s === 'object' && s !== null) sockets.set(o.name, s as Sockets)
+    })
+    return new GunKit(mergeParts(bakeNamed(gltf.scene)), sockets)
+  }
+
+  /** Часть по имени из weapons.yaml (`Body_AR_1` → узел `gun_body_ar_1`). */
+  part(name: string): EnvPart {
+    const part = this.parts.get(`gun_${name.toLowerCase()}`)
+    if (part === undefined) throw new Error(`в ките оружия нет ${name}`)
+    return part
+  }
+
+  socketsOf(body: string): Sockets {
+    const s = this.sockets.get(`gun_${body.toLowerCase()}`)
+    if (s === undefined) throw new Error(`у ${body} нет гнёзд: это не корпус`)
+    return s
+  }
+}
+
+let gunKit: Promise<GunKit> | null = null
+
+export function loadGunKit(): Promise<GunKit> {
+  gunKit ??= GunKit.load()
+  return gunKit
 }

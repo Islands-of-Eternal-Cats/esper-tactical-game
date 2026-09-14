@@ -9,7 +9,7 @@ import * as THREE from 'three'
 import type { Cell, Snapshot, UnitView, WorldView } from '../shared/protocol'
 import { IsoCamera } from './camera'
 import { Cats } from './cats'
-import { type CharacterKit, type EnvKit, type KitLoads, loadUnitKit } from './model'
+import { type CharacterKit, type EnvKit, type GunKit, type KitLoads, loadGunKit, loadUnitKit } from './model'
 import { Kit, worldToCell } from './kit'
 import { PALETTE } from './palette'
 import { Select } from './select'
@@ -69,6 +69,7 @@ export class SceneView {
   private catKit: CharacterKit | null = null
   private envKit: EnvKit | null = null
   private unitKit: CharacterKit | null = null
+  private gunKit: GunKit | null = null
 
   private pointerId: number | null = null
   private button = 0
@@ -157,7 +158,7 @@ export class SceneView {
           this.catKit = kit
           this.cats.setKit(kit)
           // Свои в перестрелке — коты: если кит юнитов уже здесь, пересобрать.
-          if (this.unitKit !== null && this.world.mode === 'skirmish') this.units.setKits(this.unitKit, kit)
+          if (this.unitKit !== null && this.world.mode === 'skirmish') this.units.setKits(this.unitKit, kit, this.gunKit)
         },
         (err: unknown) => console.warn('кит персонажей не загрузился, остаёмся на капсуле', err),
       ),
@@ -271,14 +272,20 @@ export class SceneView {
   private wantUnitKit(): void {
     if (this.world.mode !== 'skirmish') return
     if (this.unitKit !== null) {
-      this.units.setKits(this.unitKit, this.catKit)
+      this.units.setKits(this.unitKit, this.catKit, this.gunKit)
       return
     }
-    loadUnitKit().then(
-      (kit) => {
+    // Оружие — вместе с юнитами: без него кот держит брусок, и это не поломка.
+    const guns = loadGunKit().catch((err: unknown) => {
+      console.warn('кит оружия не загрузился, оружие бруском', err)
+      return null
+    })
+    Promise.all([loadUnitKit(), guns]).then(
+      ([kit, gunKit]) => {
         this.unitKit = kit
+        this.gunKit = gunKit
         // Двор мог смениться, пока кит летел: ставить — текущему.
-        if (this.world.mode === 'skirmish') this.units.setKits(kit, this.catKit)
+        if (this.world.mode === 'skirmish') this.units.setKits(kit, this.catKit, gunKit)
       },
       (err: unknown) => console.warn('кит юнитов не загрузился, бой на капсулах', err),
     )

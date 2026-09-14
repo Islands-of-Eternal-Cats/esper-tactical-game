@@ -74,6 +74,16 @@ export interface WorldView {
   walls: Cell[]
   props: PropView[]
   container: Cell
+  /** Оружие по id: как зовётся и из чего собрано. Один раз на двор, не в снапшоте. */
+  weapons: Record<string, WeaponView>
+}
+
+/** Части модели оружия по гнёздам корпуса: `body` обязателен, остальное — что есть. */
+export type WeaponLook = { body: string } & Record<string, string>
+
+export interface WeaponView {
+  name: string
+  look: WeaponLook
 }
 
 export interface PileView {

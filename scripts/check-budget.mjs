@@ -27,12 +27,12 @@ function walk(dir) {
 }
 
 /**
- * Кит юнитов грузится только в перестрелке, после старта — у него свой
- * порог, в начальную загрузку он не входит. Техплан: скелет и анимации —
- * 50–150 КБ.
+ * Киты перестрелки — юнитов и оружия — грузятся только в ней, после старта:
+ * у них общий свой порог, в начальную загрузку они не входят. Техплан:
+ * скелет и анимации — 50–150 КБ; оружие из частей — ещё ~65.
  */
-const LIMIT_UNIT_KB = 160
-const LATE = /unit-kit\.glb$/
+const LIMIT_UNIT_KB = 230
+const LATE = /(unit-kit|gun-kit)\.glb$/
 
 // Модели входят в начальную загрузку наравне с кодом: их вес уползает так же
 // незаметно, а в бюджете техплана они отдельная строка.
@@ -50,10 +50,10 @@ for (const f of files) {
 rows.sort((a, b) => b[1] - a[1])
 for (const [f, kb] of rows) console.log(`  ${kb.toFixed(1).padStart(7)} КБ  ${f}${LATE.test(f) ? '  (позже, в перестрелке)' : ''}`)
 console.log(`  ${total.toFixed(1).padStart(7)} КБ  начальная загрузка (gzip), порог ${LIMIT_KB} КБ`)
-if (late > 0) console.log(`  ${late.toFixed(1).padStart(7)} КБ  кит юнитов, порог ${LIMIT_UNIT_KB} КБ`)
+if (late > 0) console.log(`  ${late.toFixed(1).padStart(7)} КБ  киты перестрелки, порог ${LIMIT_UNIT_KB} КБ`)
 
 if (late > LIMIT_UNIT_KB) {
-  console.error(`\nКит юнитов тяжелее порога: ${late.toFixed(1)} КБ > ${LIMIT_UNIT_KB} КБ`)
+  console.error(`\nКиты перестрелки тяжелее порога: ${late.toFixed(1)} КБ > ${LIMIT_UNIT_KB} КБ`)
   process.exit(1)
 }
 if (total > LIMIT_KB) {

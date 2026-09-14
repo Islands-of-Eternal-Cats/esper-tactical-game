@@ -45,7 +45,7 @@ function join(json, rest) {
 
 // Кит юнитов собирается отдельно (`npm run assets:unit`) и пакуется, только
 // если он есть: исходники Mixamo в репозитории не лежат.
-const KITS = process.argv.length > 2 ? process.argv.slice(2) : ['character-kit', 'env-kit', 'unit-kit']
+const KITS = process.argv.length > 2 ? process.argv.slice(2) : ['character-kit', 'env-kit', 'unit-kit', 'gun-kit']
 
 for (const name of KITS) {
   const src = `public/models/${name}.glb`
