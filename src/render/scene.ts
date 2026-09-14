@@ -6,20 +6,29 @@
  */
 
 import * as THREE from 'three'
-import type { Cell, Snapshot, WorldView } from '../shared/protocol'
+import type { Cell, Snapshot, UnitView, WorldView } from '../shared/protocol'
 import { IsoCamera } from './camera'
 import { Cats } from './cats'
 import { type CatKit, type EnvKit, type KitLoads } from './model'
 import { Kit, worldToCell } from './kit'
 import { PALETTE } from './palette'
+import { Select } from './select'
+import { Units } from './units'
 
 export interface SceneHandlers {
   onIntent: (cell: Cell) => void
   onClearIntent: () => void
+  /** Перестрелка: приказ выделенным идти в клетку. */
+  onMove: (units: string[], cell: Cell) => void
+  /** Выделение сменилось — интерфейсу показать, кого. */
+  onSelect: (units: string[]) => void
 }
 
 /** Смещение курсора, после которого жест считается панорамой, а не кликом. */
 const DRAG_SLOP = 4
+
+/** Радиус попадания в фигуру на экране, px: капсула стоит выше своей клетки. */
+const PICK_PX = 22
 
 /**
  * Фон — вертикальный градиент: сверху холодное «небо», внизу графит тумана.
@@ -48,12 +57,19 @@ export class SceneView {
   private world: WorldView
   private kit: Kit
   private cats: Cats
+  private units: Units
+  private select: Select
+  /** Последний снапшот: по нему клик попадает в юнита. */
+  private snap: Snapshot | null = null
+  /** Выделение живёт здесь целиком: воркер знает только итоговый список id. */
+  private selected = new Set<string>()
   private contextLost = false
   /** Кит переживает пересборку двора: грузить его на каждый сид незачем. */
   private catKit: CatKit | null = null
   private envKit: EnvKit | null = null
 
   private pointerId: number | null = null
+  private button = 0
   private startX = 0
   private startY = 0
   private lastX = 0
@@ -115,6 +131,8 @@ export class SceneView {
     if (this.envKit !== null) this.kit.setEnv(this.envKit)
     this.cats = new Cats(this.scene, world)
     if (this.catKit !== null) this.cats.setKit(this.catKit)
+    this.units = new Units(this.scene, world)
+    this.select = new Select(this.scene, world, canvas.parentElement ?? document.body)
     this.view.lookAtCentre(0, 0)
 
     // Мобильные браузеры убивают контекст при сворачивании.
@@ -152,16 +170,21 @@ export class SceneView {
   }
 
   /**
-   * Ввод через Pointer Events. Клик и панорама живут на одной кнопке, поэтому
-   * жест решается порогом: сдвинул — панорама, не сдвинул — намерение.
+   * Ввод через Pointer Events. Клик и жест живут на одной кнопке, поэтому
+   * жест решается порогом: сдвинул — жест, не сдвинул — клик.
+   *
+   * Двор: левая — намерение, тянуть — панорама.
+   * Перестрелка: левая — выделить или послать, тянуть — рамка; правая —
+   * снять выделение, тянуть правой — панорама.
    */
   private bindPointer(handlers: SceneHandlers): void {
     const c = this.canvas
     c.style.touchAction = 'none'
 
     c.addEventListener('pointerdown', (e) => {
-      if (e.button !== 0) return
+      if (e.button !== 0 && e.button !== 2) return
       this.pointerId = e.pointerId
+      this.button = e.button
       this.startX = this.lastX = e.clientX
       this.startY = this.lastY = e.clientY
       this.dragging = false
@@ -175,29 +198,48 @@ export class SceneView {
         const dy = e.clientY - this.startY
         if (dx * dx + dy * dy > DRAG_SLOP * DRAG_SLOP) this.dragging = true
       }
-      if (this.dragging) {
-        this.view.pan(e.clientX - this.lastX, e.clientY - this.lastY)
-        this.lastX = e.clientX
-        this.lastY = e.clientY
+      if (!this.dragging) return
+      if (this.boxing()) {
+        this.select.setBox({ x0: this.startX, y0: this.startY, x1: e.clientX, y1: e.clientY })
+        return
       }
+      this.view.pan(e.clientX - this.lastX, e.clientY - this.lastY)
+      this.lastX = e.clientX
+      this.lastY = e.clientY
     })
 
     const finish = (e: PointerEvent): void => {
       if (e.pointerId !== this.pointerId) return
       this.pointerId = null
-      if (this.dragging) return
+      if (this.dragging) {
+        if (this.boxing()) {
+          this.select.setBox(null)
+          this.boxSelect(this.startX, this.startY, e.clientX, e.clientY, e.shiftKey, handlers)
+        }
+        return
+      }
+      if (this.button === 2) {
+        // Правая без сдвига: снять выделение или приоритет — по режиму.
+        if (this.world.mode === 'skirmish') this.setSelection([], handlers)
+        else handlers.onClearIntent()
+        return
+      }
       const cell = this.cellAt(e.clientX, e.clientY)
-      if (cell !== null) handlers.onIntent(cell)
+      if (cell === null) return
+      if (this.world.mode === 'yard') {
+        handlers.onIntent(cell)
+        return
+      }
+      this.clickSkirmish(cell, e.shiftKey, handlers, e.clientX, e.clientY)
     }
     c.addEventListener('pointerup', finish)
     c.addEventListener('pointercancel', () => {
       this.pointerId = null
+      this.select.setBox(null)
     })
 
-    c.addEventListener('contextmenu', (e) => {
-      e.preventDefault()
-      handlers.onClearIntent()
-    })
+    // Меню браузера — никогда; сама правая кнопка обрабатывается через pointer.
+    c.addEventListener('contextmenu', (e) => e.preventDefault())
 
     c.addEventListener('wheel', (e) => {
       e.preventDefault()
@@ -215,6 +257,85 @@ export class SceneView {
       else if (e.code === 'KeyR' || e.key === 'r') this.view.rotate(0)
       else if (e.code === 'KeyF' || e.key === 'f') this.follow = !this.follow
     })
+  }
+
+  /** Левая протяжка в перестрелке — рамка; всё остальное — панорама. */
+  private boxing(): boolean {
+    return this.button === 0 && this.world.mode === 'skirmish'
+  }
+
+  private setSelection(ids: string[], handlers: SceneHandlers): void {
+    this.selected = new Set(ids)
+    handlers.onSelect(ids)
+  }
+
+  /**
+   * Клик по своему — выделить (Shift — добавить или убрать). Клик по земле
+   * с выделением — приказ. Без выделения — ничего: клик, который делает
+   * что-то невидимое, хуже клика, который не делает ничего.
+   */
+  private clickSkirmish(cell: Cell, shift: boolean, handlers: SceneHandlers, clientX: number, clientY: number): void {
+    if (this.snap === null) return
+    const own = Units.at(this.snap, cell, 'player') ?? this.pick(clientX, clientY)
+    if (own !== null) {
+      const next = shift ? new Set(this.selected) : new Set<string>()
+      if (shift && next.has(own.id)) next.delete(own.id)
+      else next.add(own.id)
+      this.setSelection([...next], handlers)
+      return
+    }
+    if (this.selected.size === 0) return
+    const ids = [...this.selected]
+    handlers.onMove(ids, cell)
+    this.select.order(cell, ids)
+  }
+
+  /** Экранная точка фигуры — по груди, где на неё и кликают. */
+  private screenOf(id: string, out: THREE.Vector3): { x: number; y: number } | null {
+    const at = this.units.positionOf(id)
+    if (at === null) return null
+    const r = this.canvas.getBoundingClientRect()
+    out.copy(at)
+    out.y = 0.5
+    out.project(this.view.camera)
+    return { x: r.left + ((out.x + 1) / 2) * r.width, y: r.top + ((1 - out.y) / 2) * r.height }
+  }
+
+  /** Свой, чья фигура на экране ближе всего к клику, если он в радиусе. */
+  private pick(clientX: number, clientY: number): UnitView | null {
+    if (this.snap === null) return null
+    let best: UnitView | null = null
+    let bestD = PICK_PX * PICK_PX
+    const p = new THREE.Vector3()
+    for (const u of this.snap.units) {
+      if (u.side !== 'player' || u.action === 'dead') continue
+      const at = this.screenOf(u.id, p)
+      if (at === null) continue
+      const d = (at.x - clientX) ** 2 + (at.y - clientY) ** 2
+      if (d < bestD) {
+        best = u
+        bestD = d
+      }
+    }
+    return best
+  }
+
+  /** Рамка: свои, чья экранная точка попала внутрь. */
+  private boxSelect(x0: number, y0: number, x1: number, y1: number, shift: boolean, handlers: SceneHandlers): void {
+    if (this.snap === null) return
+    const left = Math.min(x0, x1)
+    const right = Math.max(x0, x1)
+    const top = Math.min(y0, y1)
+    const bottom = Math.max(y0, y1)
+    const next = shift ? new Set(this.selected) : new Set<string>()
+    const p = new THREE.Vector3()
+    for (const u of this.snap.units) {
+      if (u.side !== 'player' || u.action === 'dead') continue
+      const at = this.screenOf(u.id, p)
+      if (at === null) continue
+      if (at.x >= left && at.x <= right && at.y >= top && at.y <= bottom) next.add(u.id)
+    }
+    this.setSelection([...next], handlers)
   }
 
   private cellAt(clientX: number, clientY: number): Cell | null {
@@ -236,10 +357,16 @@ export class SceneView {
     this.world = world
     this.kit.dispose()
     this.cats.dispose()
+    this.units.dispose()
+    this.select.dispose()
     this.kit = new Kit(this.scene, world)
     if (this.envKit !== null) this.kit.setEnv(this.envKit)
     this.cats = new Cats(this.scene, world)
     if (this.catKit !== null) this.cats.setKit(this.catKit)
+    this.units = new Units(this.scene, world)
+    this.select = new Select(this.scene, world, this.canvas.parentElement ?? document.body)
+    this.snap = null
+    this.selected = new Set()
   }
 
   resize(): void {
@@ -258,8 +385,15 @@ export class SceneView {
     if (this.contextLost) return
     this.kit.flicker(dt)
     if (snap !== null) {
+      this.snap = snap
       this.kit.sync(snap)
       this.cats.sync(snap, dt)
+      this.units.sync(snap, dt, this.view.camera)
+      this.select.sync(snap, this.selected, dt)
+      for (const id of this.selected) {
+        const at = this.units.positionOf(id)
+        if (at !== null) this.select.placeRing(id, at)
+      }
       if (this.follow) {
         const p = this.cats.positionOf(snap.cats[0]?.id ?? '')
         if (p !== null) this.view.lookAtCentre(p.x, p.z)

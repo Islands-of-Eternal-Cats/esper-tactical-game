@@ -5,12 +5,29 @@
  * панель докладов или ростер. Строка состояния списком не считается.
  */
 
-import type { Snapshot, Speed } from '../shared/protocol'
+import type { Mode, Snapshot, Speed } from '../shared/protocol'
 
 export interface HudHandlers {
   onSpeed: (speed: Speed) => void
   onReset: (seed: number) => void
+  onMode: (mode: Mode) => void
   onDebugClearPiles: () => void
+}
+
+const MODES: ReadonlyArray<{ value: Mode; label: string }> = [
+  { value: 'yard', label: 'двор' },
+  { value: 'skirmish', label: 'перестрелка' },
+]
+
+const HINT: Record<Mode, string> = {
+  yard:
+    'клик по земле — где важнее · правая кнопка — снять приоритет · колесо — зум · тянуть — панорама' +
+    '<br>пробел — пауза и обратно на прежнюю скорость · 1–4 — ×0.1 · ×0.5 · ×1 · ×3' +
+    '<br>отладка: Q/E — повернуть камеру, R — изометрия, F — следовать за котом',
+  skirmish:
+    'клик по своему — выделить · тянуть — рамка · Shift — добавить · клик по земле — идти туда' +
+    '<br>правая кнопка — снять выделение · тянуть правой — панорама · колесо — зум' +
+    '<br>пробел — пауза · 1–4 — скорость · Q/E — повернуть камеру, R — изометрия',
 }
 
 /** Пять цифр: такой сид можно продиктовать вслух и записать на бумажке. */
@@ -41,11 +58,17 @@ const KEY_SPEED: ReadonlyArray<{ codes: readonly string[]; keys: readonly string
 ]
 
 export class Hud {
+  private readonly name: HTMLElement
   private readonly status: HTMLElement
   private readonly load: HTMLElement
   private readonly totals: HTMLElement
+  private readonly hint: HTMLElement
   private readonly buttons = new Map<Speed, HTMLButtonElement>()
+  private readonly modeButtons = new Map<Mode, HTMLButtonElement>()
   private readonly seed: HTMLInputElement
+  private mode: Mode = 'yard'
+  /** Кого игрок выделил: статус в панели — про первого живого из них. */
+  private selected: string[] = []
   private current: Speed = 1
   /** Куда пробел возвращает из паузы: последняя ненулевая скорость. */
   private resume: Speed = 1
@@ -61,6 +84,7 @@ export class Hud {
     `
     root.appendChild(panel)
 
+    this.name = panel.querySelector('.name')!
     this.status = panel.querySelector('.status')!
     this.load = panel.querySelector('.bar > i')!
     this.totals = panel.querySelector('.totals')!
@@ -111,6 +135,24 @@ export class Hud {
     })
     root.appendChild(seeds)
 
+    // Срез: двор или перестрелка. Смена — новый двор на том же сиде.
+    const modes = document.createElement('div')
+    modes.className = 'seeds'
+    const modeLabel = document.createElement('label')
+    modeLabel.textContent = 'срез'
+    modes.appendChild(modeLabel)
+    for (const { value, label } of MODES) {
+      const b = document.createElement('button')
+      b.textContent = label
+      b.addEventListener('click', () => {
+        b.blur()
+        handlers.onMode(value)
+      })
+      modes.appendChild(b)
+      this.modeButtons.set(value, b)
+    }
+    root.appendChild(modes)
+
     // Отладка: строка кнопок, которых в игре не будет.
     const debug = document.createElement('div')
     debug.className = 'seeds'
@@ -123,15 +165,24 @@ export class Hud {
     debug.appendChild(clearPiles)
     root.appendChild(debug)
 
-    const hint = document.createElement('div')
-    hint.className = 'hint'
-    hint.innerHTML =
-      'клик по земле — где важнее · правая кнопка — снять приоритет · колесо — зум · тянуть — панорама' +
-      '<br>пробел — пауза и обратно на прежнюю скорость · 1–4 — ×0.1 · ×0.5 · ×1 · ×3' +
-      '<br>отладка: Q/E — повернуть камеру, R — изометрия, F — следовать за котом'
-    root.appendChild(hint)
+    this.hint = document.createElement('div')
+    this.hint.className = 'hint'
+    root.appendChild(this.hint)
+    this.setMode('yard')
 
     this.bindKeys(handlers)
+  }
+
+  setMode(mode: Mode): void {
+    this.mode = mode
+    this.selected = []
+    this.name.textContent = mode === 'yard' ? 'Ржавый' : 'Отряд'
+    this.hint.innerHTML = HINT[mode]
+    for (const [value, button] of this.modeButtons) button.classList.toggle('on', value === mode)
+  }
+
+  setSelection(ids: string[]): void {
+    this.selected = ids
   }
 
   /** Что набрано в поле. Мусор превращается в ноль, а не в тихий отказ. */
@@ -182,11 +233,37 @@ export class Hud {
 
   /** Снапшот приходит троттленным: чаще 10–15 Гц человек всё равно не читает. */
   update(snap: Snapshot): void {
+    if (this.mode === 'skirmish') {
+      this.updateSkirmish(snap)
+      return
+    }
     const cat = snap.cats[0]
     if (cat === undefined) return
     this.status.textContent = cat.status
     this.load.style.width = `${Math.round((cat.load / cat.capacity) * 100)}%`
     this.totals.textContent =
       `убрано ${snap.totals.collected.toFixed(1)} · осталось ${snap.totals.remaining.toFixed(1)}`
+  }
+
+  /**
+   * Статус выделенного, а не «отряда в целом»: игрок спрашивает «почему
+   * этот стоит», и ответ должен быть про этого.
+   */
+  private updateSkirmish(snap: Snapshot): void {
+    const own = snap.units.filter((u) => u.side === 'player' && u.action !== 'dead')
+    const foe = snap.units.filter((u) => u.side === 'enemy' && u.action !== 'dead')
+    const picked = snap.units.find((u) => this.selected.includes(u.id) && u.action !== 'dead')
+    if (picked !== undefined) {
+      const many = this.selected.length > 1 ? ` (+${this.selected.length - 1})` : ''
+      this.status.textContent = `${picked.id}${many}: ${picked.status}${picked.cover ? ' · в укрытии' : ''}`
+      this.load.style.width = `${Math.round((picked.hp / 3) * 100)}%`
+    } else {
+      this.status.textContent = own.length === 0 ? 'отряд выбит' : 'клик по бойцу или рамка — выделить'
+      this.load.style.width = '0%'
+    }
+    let outcome = ''
+    if (foe.length === 0 && own.length > 0) outcome = ' · противник выбит'
+    else if (own.length === 0) outcome = ' · поражение'
+    this.totals.textContent = `свои ${own.length} · противник ${foe.length}${outcome}`
   }
 }

@@ -16,7 +16,7 @@ import type { CatView, Dir, Snapshot, WorldView } from '../shared/protocol'
 import { bone, clip, type CatKit, type CatRig } from './model'
 import { cellToWorld, disposeTree } from './kit'
 import { PALETTE } from './palette'
-import { smoothAlong } from './path'
+import { Glide } from './glide'
 import { Hose } from './hose'
 
 /** Части, которые показывает Ржавый. Кит несёт и чужие — они гасятся. */
@@ -367,15 +367,14 @@ export class Cats {
   private readonly objects = new Map<string, CatObject>()
   private readonly a = new THREE.Vector3()
   private readonly b = new THREE.Vector3()
-  private readonly c = new THREE.Vector3()
-  /** Ломаная маршрута: prev, cell, next, дальше — без аллокаций на кадр. */
-  private readonly route: THREE.Vector3[] = Array.from({ length: 8 }, () => new THREE.Vector3())
+  private readonly glide: Glide
   private kit: CatKit | null = null
 
   constructor(
     private readonly scene: THREE.Scene,
     private readonly world: WorldView,
   ) {
+    this.glide = new Glide(world)
     scene.add(this.root)
   }
 
@@ -409,22 +408,9 @@ export class Cats {
     return this.kit === null ? new StandInFigure() : new ModelFigure(this.kit.spawn(RUSTY_PARTS))
   }
 
-  /** Тик последнего снапшота и модельное время, прошедшее с него. */
-  private seenTick = -1
-  private sinceTick = 0
-
   /** `dt` — реальное время кадра, умноженное на множитель скорости. */
   sync(snap: Snapshot, dt: number): void {
-    // Снапшот приходит раз в тик, а тик — 50 мс модельного времени: на ×0.1
-    // это два раза в секунду. Между снапшотами позиция ведётся вперёд по
-    // тому же закону, по которому её посчитает симуляция, — поэтому в
-    // момент прихода снапшота она уже там, и стыка не видно.
-    if (snap.tick !== this.seenTick) {
-      this.seenTick = snap.tick
-      this.sinceTick = 0
-    } else {
-      this.sinceTick += dt * 1000
-    }
+    this.glide.frame(snap.tick, dt)
     for (const view of snap.cats) {
       let obj = this.objects.get(view.id)
       if (obj === undefined) {
@@ -436,38 +422,9 @@ export class Cats {
     }
   }
 
-  /** Ломаная prev → cell → next → route… в `this.route`; вернёт число точек. */
-  private routePoints(view: CatView): number {
-    let n = 0
-    const push = (cell: { x: number; y: number }): void => {
-      if (n < this.route.length) cellToWorld(cell, this.world, this.route[n++]!)
-    }
-    push(view.prev ?? view.cell)
-    push(view.cell)
-    for (const cell of view.route) push(cell)
-    return n
-  }
-
   private place(obj: CatObject, view: CatView, dt: number): void {
-    // Позиция — вдоль маршрута по прогрессу. Симуляция дискретная, картинка
-    // непрерывная. Прогресс экстраполируется на время с последнего тика той
-    // же скоростью, что и в симуляции, и упирается в следующую клетку.
-    let speed = 0
-    let s = 0
-    if (view.next !== null) {
-      cellToWorld(view.cell, this.world, this.a)
-      cellToWorld(view.next, this.world, this.b)
-      const moving = view.action === 'walk' || view.action === 'haul'
-      const ahead = moving && view.stepMs > 0 ? this.sinceTick / view.stepMs : 0
-      if (moving && view.stepMs > 0) speed = this.a.distanceTo(this.b) / (view.stepMs / 1000)
-      s = Math.min(1, view.progress + ahead)
-    }
-
-    // Лесенка A* сглаживается скользящим средним по маршруту: центры
-    // клеток зигзага лежат по обе стороны прямой, и среднее по окну в
-    // клетку ложится на неё. Симуляция об этом не знает и знать не должна.
-    const n = this.routePoints(view)
-    smoothAlong(this.route, n, 1 + s, this.a)
+    const moving = view.action === 'walk' || view.action === 'haul'
+    const { speed, tangentYaw } = this.glide.place(view, moving, this.a)
 
     // На разгрузке кот стоит в соседней с контейнером клетке, а контейнер
     // шире клетки и разгрузка — взмах вперёд: без отступа рука входит в
@@ -494,10 +451,8 @@ export class Cats {
     let yawTarget: number
     if (faceTarget !== null) {
       yawTarget = faceTarget
-    } else if (speed > 0 && n >= 3) {
-      smoothAlong(this.route, n, 1 + s + 0.25, this.b)
-      smoothAlong(this.route, n, 1 + s - 0.25, this.c)
-      yawTarget = Math.atan2(this.b.x - this.c.x, this.b.z - this.c.z)
+    } else if (tangentYaw !== null) {
+      yawTarget = tangentYaw
     } else {
       const [hx, hz] = HEADING[view.facing]
       yawTarget = Math.atan2(hx, hz)

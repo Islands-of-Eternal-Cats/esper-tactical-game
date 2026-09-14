@@ -8,8 +8,13 @@ import { gzipSync } from 'node:zlib'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
-/** Килобайт по сети на весь начальный чанк. Техплан: 0,5–0,8 МБ на всю игру. */
-const LIMIT_KB = 400
+/**
+ * Килобайт по сети на весь начальный чанк. Техплан: 0,5–0,8 МБ на всю игру.
+ * 400 было для «Ржавого»; срез «Перестрелка» добавил ~6 КБ ядра боя и
+ * рендера юнитов, и порог поднят до 420 — пока всё ещё в нижней половине
+ * бюджета игры.
+ */
+const LIMIT_KB = 420
 
 function walk(dir) {
   const out = []
