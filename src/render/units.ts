@@ -433,15 +433,17 @@ class ModelFigure implements Figure {
     // оружии, ствол — от правой к левой. Раньше покой шёл по фиксированному
     // направлению «на ремне»: у перенесённых клипов рука висела где попало.
     const dir = this.body.worldToLocal(this.handL.getWorldPosition(this.v2)).sub(grip)
-    if (dir.lengthSq() < 1e-6) return
-    dir.normalize()
+    const span = dir.length()
+    if (span < 1e-3) return
+    dir.divideScalar(span)
     this.gun.position.copy(grip).addScaledVector(dir, this.gunAhead)
     this.gun.quaternion.setFromUnitVectors(FORWARD, dir)
     if (this.armL === null || this.foreArmL === null) return
-    // Левая ладонь — на цевьё. Клип задал направление, IK дотягивает кисть:
-    // перенесённые на кота клипы кладут её рядом с оружием, но не на него.
+    // Левая ладонь — на цевьё: IK кладёт кисть на линию ствола. Но не дальше,
+    // чем её держит клип: в покое ладони близко, и тянуть кисть к цевью
+    // короткого автомата значило бы вытянуть руку в струну.
     // `dir` живёт в v2 — цель считается в своём векторе, иначе она затрёт направление.
-    const target = this.body.localToWorld(this.v3.copy(grip).addScaledVector(dir, this.hold))
+    const target = this.body.localToWorld(this.v3.copy(grip).addScaledVector(dir, Math.min(this.hold, span)))
     reach(this.armL, this.foreArmL, this.handL, target, DOWN)
   }
 }
