@@ -273,8 +273,14 @@ interface Gun {
   rz: number
 }
 
-/** У кота ладонь по кости (ось Y — вдоль кости, к пальцам): ствол вперёд по ней. */
-const CAT_GUN: Gun = { x: 0, y: -0.08, z: 0.02, rx: -Math.PI / 2, ry: 0, rz: 0 }
+/**
+ * У кота ось Y ладони идёт к пальцам, и в прицеле — вперёд, а в покое —
+ * вниз; ствол лежит вдоль неё. Центр смещён к пальцам: за рукоять держат
+ * ближе к прикладу, и в покое ружьё висит стволом вниз, а не торчит вверх
+ * вдоль предплечья.
+ */
+const CAT_GUN: Gun = { x: 0, y: 0.07, z: 0.02, rx: -Math.PI / 2, ry: 0, rz: 0 }
+const GUN_LENGTH = 0.42
 
 class ModelFigure implements Figure {
   readonly root = new THREE.Group()
@@ -313,8 +319,8 @@ class ModelFigure implements Figure {
       // руками, левая ложится на цевьё сама. Оси — в системе кости.
       const hand = bone(rig, 'mixamorig:RightHand')
       const mesh = new THREE.Mesh(
-        new THREE.BoxGeometry(0.05, 0.06, 0.55),
-        new THREE.MeshLambertMaterial({ color: PALETTE.outline }),
+        new THREE.BoxGeometry(0.035, 0.05, GUN_LENGTH),
+        new THREE.MeshLambertMaterial({ color: PALETTE.hose }),
       )
       mesh.position.set(gun.x, gun.y, gun.z)
       mesh.rotation.set(gun.rx, gun.ry, gun.rz)
