@@ -17,6 +17,7 @@ import {
 import { loadKits } from './render/model'
 import { SceneView } from './render/scene'
 import { Hud } from './ui/hud'
+import { BattleLog } from './ui/log'
 
 const UI_HZ = 12
 
@@ -69,6 +70,8 @@ let scene: SceneView | null = null
 let world: WorldView | null = null
 let snapshot: Snapshot | null = null
 let speed: Speed = 1
+/** Лог боя в консоль: только в перестрелке, двор молчит как раньше. */
+const log = new BattleLog()
 
 const hud = new Hud(hudRoot, {
   onSpeed: (s) => {
@@ -83,6 +86,12 @@ const hud = new Hud(hudRoot, {
     if (world?.mode !== mode) send({ t: 'setMode', mode })
   },
   onDebugClearPiles: () => send({ t: 'debugClearPiles' }),
+  onBattleLog: () => {
+    const text = log.text()
+    console.log(text)
+    // Буфер обмена — не везде и не всегда; лог в консоли уже есть.
+    void navigator.clipboard?.writeText(text).catch(() => undefined)
+  },
 })
 hud.setSpeed(speed)
 
@@ -112,7 +121,10 @@ worker.onmessage = (e: MessageEvent<WorkerMessage>): void => {
       scene = new SceneView(canvas, world, {
         onIntent: (cell) => send({ t: 'setZone', cell, radius: DEFAULT_ZONE_RADIUS }),
         onClearIntent: () => send({ t: 'clearZone' }),
-        onMove: (units, cell) => send({ t: 'move', units, cell }),
+        onMove: (units, cell) => {
+          send({ t: 'move', units, cell })
+          if (snapshot !== null) log.order(snapshot.tick, units, cell)
+        },
         onSelect: (units) => hud.setSelection(units),
       }, kits)
       // Отладка из консоли браузера: заглянуть в граф сцены. Только в dev.
@@ -139,10 +151,12 @@ worker.onmessage = (e: MessageEvent<WorkerMessage>): void => {
     }
     hud.setSeed(world.seed)
     hud.setMode(world.mode)
+    if (world.mode === 'skirmish') log.reset(world.seed)
     rememberSeed(world.seed, world.mode)
     return
   }
   snapshot = msg.snap
+  if (world?.mode === 'skirmish') log.note(snapshot)
 }
 
 // Срез — раньше сида: `reset` строит двор в срезе, который воркер помнит.

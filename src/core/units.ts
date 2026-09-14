@@ -160,8 +160,9 @@ function die(state: State, u: Unit): void {
 
 function shoot(state: State, u: Unit, t: Unit): void {
   const cover = coverFrom(state.grid, t.cell, u.cell)
-  const hit = rollHit(state.rng, hitChance(octile(u.cell, t.cell), cover))
-  state.events.push({ t: 'shot', from: u.id, to: t.id, hit })
+  const chance = hitChance(octile(u.cell, t.cell), cover)
+  const hit = rollHit(state.rng, chance)
+  state.events.push({ t: 'shot', from: u.id, to: t.id, hit, chance, cover })
   // Промах — тоже огонь: юнит, мимо которого свистит, ищет укрытие.
   t.underFireMs = UNDER_FIRE_MS
   t.threat = u.id

@@ -12,6 +12,8 @@ export interface HudHandlers {
   onReset: (seed: number) => void
   onMode: (mode: Mode) => void
   onDebugClearPiles: () => void
+  /** Лог боя целиком — в консоль и в буфер обмена. */
+  onBattleLog: () => void
 }
 
 const MODES: ReadonlyArray<{ value: Mode; label: string }> = [
@@ -65,6 +67,8 @@ export class Hud {
   private readonly hint: HTMLElement
   private readonly buttons = new Map<Speed, HTMLButtonElement>()
   private readonly modeButtons = new Map<Mode, HTMLButtonElement>()
+  /** Кнопки, которые есть только в одном срезе. */
+  private readonly modeOnly = new Map<Mode, HTMLElement>()
   private readonly seed: HTMLInputElement
   private mode: Mode = 'yard'
   /** Кого игрок выделил: статус в панели — про первого живого из них. */
@@ -163,6 +167,18 @@ export class Hud {
       handlers.onDebugClearPiles()
     })
     debug.appendChild(clearPiles)
+    const battleLog = document.createElement('button')
+    battleLog.textContent = 'лог боя'
+    battleLog.addEventListener('click', () => {
+      battleLog.blur()
+      handlers.onBattleLog()
+      // Подтверждение — на самой кнопке: консоль может быть закрыта.
+      battleLog.textContent = 'в консоли и буфере'
+      setTimeout(() => (battleLog.textContent = 'лог боя'), 1200)
+    })
+    debug.appendChild(battleLog)
+    this.modeOnly.set('skirmish', battleLog)
+    this.modeOnly.set('yard', clearPiles)
     root.appendChild(debug)
 
     this.hint = document.createElement('div')
@@ -179,6 +195,7 @@ export class Hud {
     this.name.textContent = mode === 'yard' ? 'Ржавый' : 'Отряд'
     this.hint.innerHTML = HINT[mode]
     for (const [value, button] of this.modeButtons) button.classList.toggle('on', value === mode)
+    for (const [value, el] of this.modeOnly) el.hidden = value !== mode
   }
 
   setSelection(ids: string[]): void {

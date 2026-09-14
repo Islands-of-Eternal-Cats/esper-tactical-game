@@ -148,7 +148,8 @@ export type UnitSign = 'pinned' | 'seek' | 'reload' | 'far' | 'stuck' | 'yield'
  * выстрел живёт один тик, и в хеш детерминизма он не попадает.
  */
 export type Event =
-  | { t: 'shot'; from: string; to: string; hit: boolean }
+  /** `chance` — в тысячных, `cover` — была ли цель укрыта: лог объясняет промах. */
+  | { t: 'shot'; from: string; to: string; hit: boolean; chance: number; cover: boolean }
   | { t: 'died'; unit: string }
 
 export interface Snapshot {
