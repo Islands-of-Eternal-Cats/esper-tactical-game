@@ -272,7 +272,8 @@ export class Hud {
     const picked = snap.units.find((u) => this.selected.includes(u.id) && u.action !== 'dead')
     if (picked !== undefined) {
       const many = this.selected.length > 1 ? ` (+${this.selected.length - 1})` : ''
-      this.status.textContent = `${picked.id}${many}: ${picked.status}${picked.cover ? ' · в укрытии' : ''}`
+      this.status.textContent =
+        `${picked.id}${many} · ${picked.weaponName}: ${picked.status}${picked.cover ? ' · в укрытии' : ''}`
       this.load.style.width = `${Math.round((picked.hp / 3) * 100)}%`
     } else {
       this.status.textContent = own.length === 0 ? 'отряд выбит' : 'клик по бойцу или рамка — выделить'

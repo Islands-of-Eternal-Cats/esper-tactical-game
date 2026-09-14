@@ -25,6 +25,7 @@ import {
   WALK_MS_PER_CELL,
 } from './tuning'
 import { alive, orderHalt, orderMove, signOf, threatOf, tickUnits } from './units'
+import { weaponOf } from './weapons'
 import { coverFrom } from './los'
 import { CONTAINER, buildGrid, placePiles } from './world'
 
@@ -84,6 +85,7 @@ export interface SaveState {
     moveAcc: number
     facing: Unit['facing']
     mode: UnitMode
+    weapon: string
     hp: number
     target: string | null
     waitMs: number
@@ -530,6 +532,8 @@ export class Sim {
       stepMs: u.path.length > 0 ? moverStepMs(u.cell, u.path[0]!, UNIT_MS_PER_CELL) : 0,
       facing: u.facing,
       action,
+      weapon: u.weapon,
+      weaponName: weaponOf(u.weapon).name,
       hp: u.hp,
       cover: threat !== null && alive(u) && coverFrom(s.grid, u.cell, threat.cell),
       target: u.target,
@@ -643,6 +647,7 @@ export class Sim {
       num(u.progress)
       num(u.moveAcc)
       num(Sim.UNIT_MODES.indexOf(u.mode))
+      str(u.weapon)
       num(u.hp)
       str(u.target ?? '-')
       num(u.waitMs)
@@ -711,6 +716,7 @@ export class Sim {
         moveAcc: u.moveAcc,
         facing: u.facing,
         mode: u.mode,
+        weapon: u.weapon,
         hp: u.hp,
         target: u.target,
         waitMs: u.waitMs,
@@ -766,6 +772,7 @@ export class Sim {
       moveAcc: u.moveAcc,
       facing: u.facing,
       mode: u.mode,
+      weapon: u.weapon,
       hp: u.hp,
       target: u.target,
       waitMs: u.waitMs,

@@ -78,25 +78,7 @@ export const UNIT_MS_PER_CELL = 900
 /** Пол-двора. */
 export const SIGHT_RANGE = 10
 
-/** Видит раньше, чем стреляет. */
-export const FIRE_RANGE = 8
-
-/** Пауза перед первым выстрелом — читаемая. */
-export const AIM_MS = 800
-
-export const RELOAD_MS = 1200
-
-/** Сколько после выстрела фигура остаётся в позе выстрела. */
-export const FIRE_MS = 250
-
-/** В упор без укрытия, тысячные. */
-export const HIT_BASE = 600
-
-/** На клетку дальности, тысячные: на восьми клетках 0,28. */
-export const HIT_PER_CELL = -40
-
-/** Укрытие режет шанс больше чем вдвое, тысячные. */
-export const COVER_MUL = 400
+// Дальность огня, темп, шансы и урон — у оружия: src/core/weapons.yaml.
 
 /** Три попадания; смерть за 10–20 с под огнём. */
 export const HP = 3

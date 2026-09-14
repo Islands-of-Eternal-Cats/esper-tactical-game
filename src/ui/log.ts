@@ -18,6 +18,8 @@ interface Tally {
 export class BattleLog {
   private seed = 0
   private over = false
+  /** Состав ещё не напечатан: печатается первым снапшотом боя, там есть оружие. */
+  private roster = true
   private readonly tally = new Map<string, Tally>()
   /** Всё, что напечатано, — чтобы отдать бой целиком одним куском. */
   private lines: string[] = []
@@ -49,6 +51,7 @@ export class BattleLog {
   reset(seed: number): void {
     this.seed = seed
     this.over = false
+    this.roster = true
     this.tally.clear()
     this.lines = []
     this.say(`— бой, сид ${seed} —`, 'font-weight: bold')
@@ -75,6 +78,13 @@ export class BattleLog {
 
   note(snap: Snapshot): void {
     if (this.over) return
+    if (this.roster) {
+      this.roster = false
+      for (const side of ['player', 'enemy'] as const) {
+        const list = snap.units.filter((u) => u.side === side).map((u) => `${u.id} ${u.weaponName}`)
+        this.say(`  ${side === 'player' ? 'свои' : 'противник'}: ${list.join(', ')}`)
+      }
+    }
     for (const e of snap.events) this.event(snap.tick, e)
 
     const own = snap.units.filter((u) => u.side === 'player' && u.action !== 'dead')

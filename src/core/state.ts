@@ -64,6 +64,8 @@ export interface Unit extends Mover {
   id: string
   side: Side
   mode: UnitMode
+  /** id из weapons.yaml: дальность, темп, шанс и урон — там. */
+  weapon: string
   hp: number
   /** id цели, в которую целится. Приказ игрока её сбрасывает. */
   target: string | null

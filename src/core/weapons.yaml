@@ -1,0 +1,57 @@
+# Оружие перестрелки. Правится без кода: загрузчик в weapons.ts проверяет форму.
+#
+# Дальности — в клетках по октильной метрике, времена — в модельных мс,
+# шансы — в тысячных (ГПСЧ даёт целое 0..999). Всё целое: бой детерминирован.
+#
+#   fireRange  — дальше не стреляет (видит на SIGHT_RANGE из tuning.ts)
+#   aimMs      — пауза перед первым выстрелом по новой цели
+#   reloadMs   — между выстрелами
+#   fireMs     — сколько фигура держит позу выстрела (≤ reloadMs)
+#   hitBase    — шанс в упор без укрытия
+#   hitPerCell — прибавка к шансу на клетку дальности (отрицательная)
+#   coverMul   — множитель шанса по укрытому
+#   damage     — снимает здоровья за попадание (HP в tuning.ts)
+
+rifle:
+  name: винтовка
+  fireRange: 8
+  aimMs: 800
+  reloadMs: 1200
+  fireMs: 250
+  hitBase: 600
+  hitPerCell: -40
+  coverMul: 400
+  damage: 1
+
+smg:
+  name: автомат
+  fireRange: 6
+  aimMs: 500
+  reloadMs: 500
+  fireMs: 150
+  hitBase: 450
+  hitPerCell: -60
+  coverMul: 350
+  damage: 1
+
+shotgun:
+  name: дробовик
+  fireRange: 4
+  aimMs: 600
+  reloadMs: 1600
+  fireMs: 300
+  hitBase: 800
+  hitPerCell: -150
+  coverMul: 300
+  damage: 2
+
+sniper:
+  name: снайперская
+  fireRange: 10
+  aimMs: 1600
+  reloadMs: 2400
+  fireMs: 400
+  hitBase: 700
+  hitPerCell: -20
+  coverMul: 600
+  damage: 2

@@ -13,18 +13,8 @@ import { ORTHO, dirOf, octile, sameCell } from './grid'
 import { coverFrom, lineOfSight } from './los'
 import { advance, origin, setPath, stepInFlight } from './mover'
 import type { State, Unit } from './state'
-import {
-  AIM_MS,
-  BLOCKED_MS,
-  COVER_RADIUS,
-  FIRE_MS,
-  FIRE_RANGE,
-  RELOAD_MS,
-  SIGHT_RANGE,
-  TICK_MS,
-  UNDER_FIRE_MS,
-  UNIT_MS_PER_CELL,
-} from './tuning'
+import { BLOCKED_MS, COVER_RADIUS, SIGHT_RANGE, TICK_MS, UNDER_FIRE_MS, UNIT_MS_PER_CELL } from './tuning'
+import { weaponOf } from './weapons'
 
 /** Юнит, который «просто стоит», раздражает; «прижат огнём» — объясняет. */
 export const UNIT_STATUS = {
@@ -84,7 +74,7 @@ function visible(state: State, u: Unit, other: Unit): boolean {
 }
 
 function inFireRange(u: Unit, other: Unit): boolean {
-  return octile(u.cell, other.cell) <= FIRE_RANGE * ORTHO
+  return octile(u.cell, other.cell) <= weaponOf(u.weapon).fireRange * ORTHO
 }
 
 /**
@@ -133,7 +123,7 @@ function nearestEnemy(state: State, u: Unit): Unit | null {
 function beginAim(u: Unit, t: Unit): void {
   u.mode = 'aim'
   u.target = t.id
-  u.waitMs = AIM_MS
+  u.waitMs = weaponOf(u.weapon).aimMs
   // Выстрелы по этой цели: до первого — «целится», после — «перезарядка».
   u.shots = 0
   u.status = UNIT_STATUS.aim
@@ -167,20 +157,21 @@ function die(state: State, u: Unit): void {
 }
 
 function shoot(state: State, u: Unit, t: Unit): void {
+  const w = weaponOf(u.weapon)
   const cover = coverFrom(state.grid, t.cell, u.cell)
-  const chance = hitChance(octile(u.cell, t.cell), cover)
+  const chance = hitChance(w, octile(u.cell, t.cell), cover)
   const hit = rollHit(state.rng, chance)
   state.events.push({ t: 'shot', from: u.id, to: t.id, hit, chance, cover })
   // Промах — тоже огонь: юнит, мимо которого свистит, ищет укрытие.
   t.underFireMs = UNDER_FIRE_MS
   t.threat = u.id
   if (hit) {
-    t.hp -= 1
+    t.hp -= w.damage
     if (t.hp <= 0) die(state, t)
   }
   u.shots += 1
   u.mode = 'fire'
-  u.waitMs = FIRE_MS
+  u.waitMs = w.fireMs
   u.status = UNIT_STATUS.fire
 }
 
@@ -346,7 +337,7 @@ function stepAim(state: State, u: Unit): void {
   u.facing = dirOf(u.cell, t.cell) ?? u.facing
 
   if (!inFireRange(u, t)) {
-    u.waitMs = AIM_MS
+    u.waitMs = weaponOf(u.weapon).aimMs
     // Свои не сближаются сами: куда идти — решение игрока, и строка
     // состояния говорит ему, что решение требуется.
     if (u.side === 'player') {
@@ -385,8 +376,9 @@ function stepAim(state: State, u: Unit): void {
 function stepFire(u: Unit): void {
   u.waitMs -= TICK_MS
   if (u.waitMs <= 0) {
+    const w = weaponOf(u.weapon)
     u.mode = 'aim'
-    u.waitMs = RELOAD_MS - FIRE_MS
+    u.waitMs = w.reloadMs - w.fireMs
     u.status = UNIT_STATUS.reload
   }
 }

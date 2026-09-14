@@ -130,6 +130,9 @@ export interface UnitView extends MoveView {
   side: Side
   /** Единственный источник анимации, как и у кота. */
   action: 'idle' | 'move' | 'aim' | 'fire' | 'dead'
+  /** Оружие из weapons.yaml: id — для рендера, имя — для HUD и лога. Ядро считает, они показывают. */
+  weapon: string
+  weaponName: string
   hp: number
   /** Укрыт от своей текущей угрозы. Игрок должен это видеть, иначе штраф — невидимая механика. */
   cover: boolean

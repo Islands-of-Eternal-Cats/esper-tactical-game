@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest'
 import { Grid } from '../src/core/grid'
 import { hitChance } from '../src/core/combat'
 import { coverFrom, lineOfSight } from '../src/core/los'
-import { COVER_MUL, HIT_BASE, HIT_PER_CELL } from '../src/core/tuning'
+import { weaponOf } from '../src/core/weapons'
 
 /** Стена по x=5 на y=0..9 с проёмом в y=4. */
 function wallWithGap(): Grid {
@@ -103,18 +103,20 @@ describe('укрытие', () => {
 })
 
 describe('шанс попадания', () => {
+  const w = weaponOf('rifle')
+
   it('в упор без укрытия — базовый', () => {
-    expect(hitChance(0, false)).toBe(HIT_BASE)
+    expect(hitChance(w, 0, false)).toBe(w.hitBase)
   })
 
   it('падает с дальностью и режется укрытием', () => {
-    const at8 = hitChance(80, false)
-    expect(at8).toBe(HIT_BASE + HIT_PER_CELL * 8)
-    expect(hitChance(80, true)).toBe(Math.trunc((at8 * COVER_MUL) / 1000))
+    const at8 = hitChance(w, 80, false)
+    expect(at8).toBe(w.hitBase + w.hitPerCell * 8)
+    expect(hitChance(w, 80, true)).toBe(Math.trunc((at8 * w.coverMul) / 1000))
   })
 
   it('не выходит за 0..1000', () => {
-    expect(hitChance(10000, false)).toBe(0)
-    expect(hitChance(0, true)).toBeLessThanOrEqual(1000)
+    expect(hitChance(w, 10000, false)).toBe(0)
+    expect(hitChance(w, 0, true)).toBeLessThanOrEqual(1000)
   })
 })
