@@ -8,3 +8,9 @@ dist/
 assets/gen/*.glb
 !assets/gen/tripo/*.glb
 __pycache__/
+
+# Исходники Mixamo: лицензия Adobe, в репозиторий не идут
+assets/mixamo/**/*.fbx
+assets/mixamo/**/*.FBX
+assets/unit.blend
+assets/unit.blend1

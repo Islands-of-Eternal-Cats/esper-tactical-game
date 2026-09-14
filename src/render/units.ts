@@ -10,6 +10,7 @@ import * as THREE from 'three'
 import type { Dir, Event, Snapshot, UnitSign, UnitView, WorldView } from '../shared/protocol'
 import { Glide } from './glide'
 import { disposeTree } from './kit'
+import { type CharacterKit, type CharacterRig, clip } from './model'
 import { PALETTE } from './palette'
 import { Signs } from './signs'
 
@@ -43,43 +44,31 @@ function approachAngle(current: number, target: number, rate: number, dt: number
   return current + d * (1 - Math.exp(-rate * dt))
 }
 
-/** Капсула: корпус, голова, ствол, полоска здоровья, щиток укрытия. */
-class Figure {
-  readonly root = new THREE.Group()
-  private readonly body = new THREE.Group()
-  private readonly lean = new THREE.Group()
-  private readonly gun: THREE.Mesh
-  private readonly bar = new THREE.Group()
+/**
+ * Фигура юнита. Модель и капсула отвечают на одни и те же вопросы, и
+ * больше рендер про них ничего не знает.
+ */
+interface Figure {
+  readonly root: THREE.Object3D
+  readonly overlay: Overlay
+  dispose(): void
+  setYaw(yaw: number): void
+  /** `speed` — скорость земли под ногами, ед/с (0, когда стоит). */
+  animate(action: UnitView['action'], dt: number, speed: number): void
+}
+
+/**
+ * То, что над фигурой и у её ног: деления здоровья, знак, щиток укрытия.
+ * Общее для капсулы и модели — у них разный рост, но одинаковые вопросы.
+ */
+class Overlay {
+  readonly bar = new THREE.Group()
+  readonly shield: THREE.Mesh
   private readonly pips: THREE.Mesh[] = []
-  private readonly shield: THREE.Mesh
-  /** Знак над полоской: та же группа, тот же поворот к камере. */
   private readonly sign: THREE.Mesh
   private shown: UnitSign | null = null
-  private phase = 0
-  /** 0 — стоит, 1 — лежит. */
-  private fallen = 0
 
-  constructor(color: number, private readonly signs: Signs) {
-    this.root.add(this.body)
-    this.body.add(this.lean)
-
-    const mat = new THREE.MeshLambertMaterial({ color })
-    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.22, 0.44, 6, 12), mat)
-    torso.position.y = 0.5
-    torso.castShadow = true
-    this.lean.add(torso)
-
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.15, 12, 10), mat)
-    head.position.y = 0.95
-    this.lean.add(head)
-
-    this.gun = new THREE.Mesh(
-      new THREE.BoxGeometry(0.07, 0.07, 0.5),
-      new THREE.MeshLambertMaterial({ color: PALETTE.outline }),
-    )
-    this.gun.position.set(0.16, 0.6, 0.22)
-    this.lean.add(this.gun)
-
+  constructor(private readonly signs: Signs, height: number) {
     // Полоска здоровья — три деления над головой, повёрнутые к камере.
     for (let i = 0; i < HP_MAX; i++) {
       const pip = new THREE.Mesh(
@@ -91,8 +80,7 @@ class Figure {
       this.pips.push(pip)
       this.bar.add(pip)
     }
-    this.bar.position.y = 1.3
-    this.root.add(this.bar)
+    this.bar.position.y = height + 0.35
 
     this.sign = new THREE.Mesh(new THREE.PlaneGeometry(0.44, 0.44))
     this.sign.position.y = 0.34
@@ -107,16 +95,6 @@ class Figure {
     )
     this.shield.position.set(0, 0.16, 0.36)
     this.shield.visible = false
-    this.body.add(this.shield)
-  }
-
-  dispose(): void {
-    this.root.removeFromParent()
-    disposeTree(this.root)
-  }
-
-  setYaw(yaw: number): void {
-    this.body.rotation.y = yaw
   }
 
   setHp(hp: number): void {
@@ -141,16 +119,71 @@ class Figure {
     this.bar.quaternion.copy(q)
   }
 
+  /** Мёртвому ни здоровья, ни знаков. */
+  hide(): void {
+    this.bar.visible = false
+    this.shield.visible = false
+  }
+}
+
+// --------------------------------------------------------------------------
+// Капсула: то, что видно, пока кит не приехал
+// --------------------------------------------------------------------------
+
+class StandInFigure implements Figure {
+  readonly root = new THREE.Group()
+  readonly overlay: Overlay
+  private readonly body = new THREE.Group()
+  private readonly lean = new THREE.Group()
+  private readonly gun: THREE.Mesh
+  private phase = 0
+  /** 0 — стоит, 1 — лежит. */
+  private fallen = 0
+
+  constructor(color: number, signs: Signs) {
+    this.root.add(this.body)
+    this.body.add(this.lean)
+
+    const mat = new THREE.MeshLambertMaterial({ color })
+    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.22, 0.44, 6, 12), mat)
+    torso.position.y = 0.5
+    torso.castShadow = true
+    this.lean.add(torso)
+
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.15, 12, 10), mat)
+    head.position.y = 0.95
+    this.lean.add(head)
+
+    this.gun = new THREE.Mesh(
+      new THREE.BoxGeometry(0.07, 0.07, 0.5),
+      new THREE.MeshLambertMaterial({ color: PALETTE.outline }),
+    )
+    this.gun.position.set(0.16, 0.6, 0.22)
+    this.lean.add(this.gun)
+
+    this.overlay = new Overlay(signs, 0.95)
+    this.root.add(this.overlay.bar)
+    this.body.add(this.overlay.shield)
+  }
+
+  dispose(): void {
+    this.root.removeFromParent()
+    disposeTree(this.root)
+  }
+
+  setYaw(yaw: number): void {
+    this.body.rotation.y = yaw
+  }
+
   animate(action: UnitView['action'], dt: number): void {
     this.phase += dt
     const phase = this.phase
     if (action === 'dead') {
       this.fallen = Math.min(1, this.fallen + dt / FALL_S)
-      this.bar.visible = false
-      this.shield.visible = false
+      this.overlay.hide()
     }
-    // Труп — капсула лежит. Достаточно.
-    // Лёжа корпус лежит на боку радиусом на полу, а не по оси.
+    // Труп — капсула лежит. Достаточно. Лёжа корпус лежит на боку радиусом
+    // на полу, а не по оси.
     this.lean.rotation.x = -this.fallen * (Math.PI / 2)
     this.lean.position.y = this.fallen * 0.2
     if (this.fallen > 0) return
@@ -186,9 +219,119 @@ class Figure {
   }
 }
 
+// --------------------------------------------------------------------------
+// Модель из кита
+// --------------------------------------------------------------------------
+
+/** Клипы кита по действию. Имена — контракт с ассетом, `tests/unit-kit.test.ts`. */
+const CLIP_OF: Record<UnitView['action'], string> = {
+  idle: 'idle',
+  move: 'run',
+  aim: 'aim',
+  fire: 'fire',
+  dead: 'die',
+}
+
+/** Однократные клипы: выстрел отыгрывается и держит последний кадр, смерть — тоже. */
+const ONCE = new Set<UnitView['action']>(['fire', 'dead'])
+
+/**
+ * Кроссфейд между занятиями. В бег — быстро, как у кота: клетка проходится
+ * за 0.9 с, и полсекунды фейда — это полпути в позе покоя.
+ */
+const FADE: Record<UnitView['action'], number> = {
+  move: 0.08,
+  idle: 0.2,
+  aim: 0.15,
+  fire: 0.04,
+  dead: 0.1,
+}
+
+/** Рост модели — из скрипта сборки (HEIGHT). Полоска и знак — над ним. */
+const MODEL_HEIGHT = 1.35
+
+function footSpeedOf(clip: THREE.AnimationClip): number | null {
+  const v: unknown = (clip.userData as Record<string, unknown>)['foot_speed']
+  return typeof v === 'number' && v > 0 ? v : null
+}
+
+class ModelFigure implements Figure {
+  readonly root = new THREE.Group()
+  readonly overlay: Overlay
+  private readonly body = new THREE.Group()
+  private readonly mixer: THREE.AnimationMixer
+  private readonly clips = new Map<UnitView['action'], THREE.AnimationAction>()
+  private readonly material: THREE.MeshLambertMaterial
+  private playing: UnitView['action'] | null = null
+
+  constructor(rig: CharacterRig, color: number, signs: Signs) {
+    this.root.add(this.body)
+    this.body.add(rig.root)
+    // Материал кита — один плоский на всех; цвет стороны — свой экземпляр.
+    this.material = new THREE.MeshLambertMaterial({ color })
+    rig.root.traverse((o) => {
+      if (o instanceof THREE.Mesh) {
+        o.material = this.material
+        o.castShadow = true
+      }
+    })
+
+    this.mixer = new THREE.AnimationMixer(rig.root)
+    for (const action of Object.keys(CLIP_OF) as UnitView['action'][]) {
+      const a = this.mixer.clipAction(clip(rig, CLIP_OF[action]))
+      if (ONCE.has(action)) {
+        a.setLoop(THREE.LoopOnce, 1)
+        a.clampWhenFinished = true
+      } else {
+        a.setLoop(THREE.LoopRepeat, Infinity)
+      }
+      this.clips.set(action, a)
+    }
+
+    this.overlay = new Overlay(signs, MODEL_HEIGHT)
+    this.root.add(this.overlay.bar)
+    this.body.add(this.overlay.shield)
+  }
+
+  /** Геометрия и клипы — общие с китом; своё здесь — микшер и материал. */
+  dispose(): void {
+    this.mixer.stopAllAction()
+    this.mixer.uncacheRoot(this.mixer.getRoot())
+    this.material.dispose()
+    this.root.removeFromParent()
+  }
+
+  setYaw(yaw: number): void {
+    this.body.rotation.y = yaw
+  }
+
+  animate(action: UnitView['action'], dt: number, speed: number): void {
+    if (action !== this.playing && this.playing !== 'dead') {
+      const next = this.clips.get(action)
+      if (next !== undefined) {
+        const prev = this.playing === null ? undefined : this.clips.get(this.playing)
+        next.reset().play()
+        if (prev !== undefined) next.crossFadeFrom(prev, FADE[action], false)
+        this.playing = action
+        if (action === 'dead') this.overlay.hide()
+      }
+    }
+    // Ноги не скользят: темп бега — скорость земли к скорости ног в клипе.
+    const current = this.playing === null ? undefined : this.clips.get(this.playing)
+    if (current !== undefined) {
+      const footSpeed = footSpeedOf(current.getClip())
+      current.timeScale = footSpeed !== null && speed > 0 ? speed / footSpeed : 1
+    }
+    this.mixer.update(dt)
+  }
+}
+
 interface UnitObject {
   figure: Figure
+  side: UnitView['side']
   yaw: number
+  /** Умер капсулой — и остаётся ею, даже когда кит приехал. */
+  dead: boolean
 }
 
 interface Tracer {
@@ -216,6 +359,7 @@ export class Units {
   private readonly flashGeo = new THREE.SphereGeometry(0.13, 8, 6)
   private readonly missMat = new THREE.MeshBasicMaterial({ color: PALETTE.tracer, transparent: true, opacity: 0.5 })
   private readonly signs = new Signs()
+  private kit: CharacterKit | null = null
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -223,6 +367,30 @@ export class Units {
   ) {
     this.glide = new Glide(world)
     scene.add(this.root)
+  }
+
+  /**
+   * Кит приехал: фигуры пересобираются на месте, углы переносятся —
+   * подмена не выглядит рывком. Мёртвые остаются капсулами: клип смерти
+   * с середины боя проигрывать нечему.
+   */
+  setKit(kit: CharacterKit): void {
+    this.kit = kit
+    for (const [id, obj] of this.objects) {
+      if (obj.dead) continue
+      obj.figure.dispose()
+      obj.figure = this.build(obj.side)
+      obj.figure.setYaw(obj.yaw)
+      this.root.add(obj.figure.root)
+      void id
+    }
+  }
+
+  private build(side: UnitView['side']): Figure {
+    const color = side === 'player' ? PALETTE.ally : PALETTE.foe
+    return this.kit === null
+      ? new StandInFigure(color, this.signs)
+      : new ModelFigure(this.kit.spawn(['unit_body']), color, this.signs)
   }
 
   dispose(): void {
@@ -254,22 +422,19 @@ export class Units {
       let obj = this.objects.get(view.id)
       if (obj === undefined) {
         const [hx, hz] = HEADING[view.facing]
-        obj = {
-          figure: new Figure(view.side === 'player' ? PALETTE.ally : PALETTE.foe, this.signs),
-          yaw: Math.atan2(hx, hz),
-        }
+        obj = { figure: this.build(view.side), side: view.side, yaw: Math.atan2(hx, hz), dead: false }
         this.objects.set(view.id, obj)
         this.root.add(obj.figure.root)
       }
       this.place(obj, view, dt)
-      obj.figure.faceCamera(camera.quaternion)
+      obj.figure.overlay.faceCamera(camera.quaternion)
     }
     for (const e of snap.events) this.play(e)
     this.age(dt)
   }
 
   private place(obj: UnitObject, view: UnitView, dt: number): void {
-    const { tangentYaw } = this.glide.place(view, view.action === 'move', this.a)
+    const { speed, tangentYaw } = this.glide.place(view, view.action === 'move', this.a)
     obj.figure.root.position.set(this.a.x, 0, this.a.z)
 
     // Прицел — на цель точно, а не на одно из восьми направлений: стрелок,
@@ -286,10 +451,11 @@ export class Units {
     }
     if (view.action !== 'dead') obj.yaw = approachAngle(obj.yaw, yawTarget, TURN_RATE, dt)
     obj.figure.setYaw(obj.yaw)
-    obj.figure.setHp(view.hp)
-    obj.figure.setCover(view.cover)
-    obj.figure.setSign(view.sign)
-    obj.figure.animate(view.action, dt)
+    obj.figure.overlay.setHp(view.hp)
+    obj.figure.overlay.setCover(view.cover)
+    obj.figure.overlay.setSign(view.sign)
+    if (view.action === 'dead') obj.dead = true
+    obj.figure.animate(view.action, dt, speed)
   }
 
   private play(e: Event): void {

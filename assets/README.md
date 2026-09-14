@@ -2,6 +2,9 @@
 
 Два кита: `character-kit.glb` (кот) из `build-character-kit.py` и
 `env-kit.glb` (окружение) из `build-env-kit.py`; `npm run assets` собирает оба.
+Третий — `unit-kit.glb` (юниты перестрелки) из `build-unit-kit.py` по файлам
+Mixamo в `mixamo/unit/` (см. README там); `npm run assets:unit`. Исходники
+Mixamo в репозиторий не идут, готовый кит — идёт.
 
 После Blender оба кита сжимаются `scripts/pack-kits.mjs` (gltfpack, meshopt):
 геометрия и веса втрое меньше, декодер — 20 КБ в three. Имена мешей gltfpack

@@ -13,7 +13,7 @@
  * которого ноги кота скользят: переносятся из исходника по имени клипа.
  */
 import { execFileSync } from 'node:child_process'
-import { readFileSync, writeFileSync, statSync, unlinkSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, statSync, unlinkSync } from 'node:fs'
 import { createRequire } from 'node:module'
 
 const require = createRequire(import.meta.url)
@@ -43,8 +43,16 @@ function join(json, rest) {
   return Buffer.concat([header, text, rest])
 }
 
-for (const name of ['character-kit', 'env-kit']) {
+// Кит юнитов собирается отдельно (`npm run assets:unit`) и пакуется, только
+// если он есть: исходники Mixamo в репозитории не лежат.
+const KITS = process.argv.length > 2 ? process.argv.slice(2) : ['character-kit', 'env-kit', 'unit-kit']
+
+for (const name of KITS) {
   const src = `public/models/${name}.glb`
+  if (!existsSync(src)) {
+    console.log(`  ${name}: нет файла, пропуск`)
+    continue
+  }
   const tmp = `public/models/${name}.packed.glb`
   const before = statSync(src).size
   const raw = split(readFileSync(src)).json

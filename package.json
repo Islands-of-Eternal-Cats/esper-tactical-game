@@ -13,7 +13,8 @@
     "test:watch": "vitest",
     "lint": "eslint .",
     "check": "npm run lint && tsc --noEmit && vitest run",
-    "assets:pack": "node scripts/pack-kits.mjs"
+    "assets:pack": "node scripts/pack-kits.mjs",
+    "assets:unit": "/Applications/Blender.app/Contents/MacOS/Blender --background --python assets/build-unit-kit.py && node scripts/pack-kits.mjs unit-kit"
   },
   "dependencies": {
     "three": "^0.180.0"

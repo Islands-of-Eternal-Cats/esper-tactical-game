@@ -13,7 +13,7 @@
 
 import * as THREE from 'three'
 import type { CatView, Dir, Snapshot, WorldView } from '../shared/protocol'
-import { bone, clip, type CatKit, type CatRig } from './model'
+import { bone, clip, type CharacterKit, type CharacterRig } from './model'
 import { cellToWorld, disposeTree } from './kit'
 import { PALETTE } from './palette'
 import { Glide } from './glide'
@@ -144,7 +144,7 @@ class ModelFigure implements Figure {
   private readonly hoseTo = new THREE.Vector3()
   private readonly hoseSide = new THREE.Vector3()
 
-  constructor(rig: CatRig) {
+  constructor(rig: CharacterRig) {
     this.root.add(this.body)
     this.body.add(rig.root)
     // Кот отбрасывает тень: без неё он плывёт над полом, а не стоит на нём.
@@ -368,7 +368,7 @@ export class Cats {
   private readonly a = new THREE.Vector3()
   private readonly b = new THREE.Vector3()
   private readonly glide: Glide
-  private kit: CatKit | null = null
+  private kit: CharacterKit | null = null
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -383,7 +383,7 @@ export class Cats {
    * подмена не выглядит рывком, а кот не телепортируется. Фаза капсулы
    * теряется вместе с капсулой — клип всё равно начинается со своего начала.
    */
-  setKit(kit: CatKit): void {
+  setKit(kit: CharacterKit): void {
     this.kit = kit
     for (const obj of this.objects.values()) {
       obj.figure.dispose()

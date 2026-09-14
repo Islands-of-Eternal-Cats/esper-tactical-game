@@ -9,7 +9,7 @@ import * as THREE from 'three'
 import type { Cell, Snapshot, UnitView, WorldView } from '../shared/protocol'
 import { IsoCamera } from './camera'
 import { Cats } from './cats'
-import { type CatKit, type EnvKit, type KitLoads } from './model'
+import { type CharacterKit, type EnvKit, type KitLoads, loadUnitKit } from './model'
 import { Kit, worldToCell } from './kit'
 import { PALETTE } from './palette'
 import { Select } from './select'
@@ -65,8 +65,9 @@ export class SceneView {
   private selected = new Set<string>()
   private contextLost = false
   /** Кит переживает пересборку двора: грузить его на каждый сид незачем. */
-  private catKit: CatKit | null = null
+  private catKit: CharacterKit | null = null
   private envKit: EnvKit | null = null
+  private unitKit: CharacterKit | null = null
 
   private pointerId: number | null = null
   private button = 0
@@ -133,6 +134,7 @@ export class SceneView {
     if (this.catKit !== null) this.cats.setKit(this.catKit)
     this.units = new Units(this.scene, world)
     this.select = new Select(this.scene, world, canvas.parentElement ?? document.body)
+    this.wantUnitKit()
     this.view.lookAtCentre(0, 0)
 
     // Мобильные браузеры убивают контекст при сворачивании.
@@ -259,6 +261,27 @@ export class SceneView {
     })
   }
 
+  /**
+   * Кит юнитов — по требованию: во дворе не нужен, грузится при первом
+   * входе в перестрелку; до него и без него бой идёт на капсулах.
+   */
+  private wantUnitKit(): void {
+    if (this.world.mode !== 'skirmish') return
+    if (this.unitKit !== null) {
+      this.units.setKit(this.unitKit)
+      return
+    }
+    const units = this.units
+    loadUnitKit().then(
+      (kit) => {
+        this.unitKit = kit
+        // Двор мог смениться, пока кит летел: ставить — текущему.
+        if (this.units === units || this.world.mode === 'skirmish') this.units.setKit(kit)
+      },
+      (err: unknown) => console.warn('кит юнитов не загрузился, бой на капсулах', err),
+    )
+  }
+
   /** Левая протяжка в перестрелке — рамка; всё остальное — панорама. */
   private boxing(): boolean {
     return this.button === 0 && this.world.mode === 'skirmish'
@@ -367,6 +390,7 @@ export class SceneView {
     this.select = new Select(this.scene, world, this.canvas.parentElement ?? document.body)
     this.snap = null
     this.selected = new Set()
+    this.wantUnitKit()
   }
 
   resize(): void {

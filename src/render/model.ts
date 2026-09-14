@@ -19,13 +19,27 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { proceduralAsphalt, proceduralConcrete, proceduralWall } from './surface'
 
 const URL_KIT = `${import.meta.env.BASE_URL}models/character-kit.glb`
+const URL_UNIT = `${import.meta.env.BASE_URL}models/unit-kit.glb`
 
 /** Ход загрузки: байт получено и байт всего (0, пока сервер не сказал). */
 export type Progress = (loaded: number, total: number) => void
 
 export interface KitLoads {
-  cat: Promise<CatKit>
+  cat: Promise<CharacterKit>
   env: Promise<EnvKit>
+}
+
+/**
+ * Кит юнитов — тот же формат, что у кота, но грузится не со старта, а при
+ * первом входе в перестрелку: во дворе он не нужен, а в стартовый бюджет
+ * не влезает. Один запрос на страницу; отказ не повторяется — бой идёт на
+ * капсулах.
+ */
+let unitKit: Promise<CharacterKit> | null = null
+
+export function loadUnitKit(): Promise<CharacterKit> {
+  unitKit ??= CharacterKit.load(URL_UNIT)
+  return unitKit
 }
 
 /**
@@ -46,7 +60,7 @@ export function loadKits(onProgress: (fraction: number) => void): KitLoads {
     const sum = (xs: number[]): number => xs.reduce((a, b) => a + b, 0)
     onProgress(Math.min(1, sum(loaded) / sum(total)))
   }
-  return { cat: CatKit.load(report(0)), env: EnvKit.load(report(1)) }
+  return { cat: CharacterKit.load(URL_KIT, report(0)), env: EnvKit.load(report(1)) }
 }
 
 function progress(on?: Progress): ((e: ProgressEvent) => void) | undefined {
@@ -85,21 +99,22 @@ function loader(): GLTFLoader {
 }
 
 
-export interface CatRig {
+export interface CharacterRig {
   root: THREE.Object3D
   bones: Map<string, THREE.Bone>
   clips: THREE.AnimationClip[]
 }
 
-export class CatKit {
+/** Кит персонажей: скелет, части, клипы. Кот и юнит — один формат. */
+export class CharacterKit {
   private constructor(
     private readonly scene: THREE.Object3D,
     private readonly clips: THREE.AnimationClip[],
   ) {}
 
-  static async load(onProgress?: Progress): Promise<CatKit> {
-    const gltf = await loader().loadAsync(URL_KIT, progress(onProgress))
-    return new CatKit(gltf.scene, gltf.animations)
+  static async load(url: string, onProgress?: Progress): Promise<CharacterKit> {
+    const gltf = await loader().loadAsync(url, progress(onProgress))
+    return new CharacterKit(gltf.scene, gltf.animations)
   }
 
   /**
@@ -107,7 +122,7 @@ export class CatKit {
    * меша он оставит ссылку на чужой скелет, и все коты будут повторять
    * движения первого.
    */
-  spawn(parts: readonly string[]): CatRig {
+  spawn(parts: readonly string[]): CharacterRig {
     const root = cloneSkinned(this.scene)
     const wanted = new Set(parts)
     const bones = new Map<string, THREE.Bone>()
@@ -134,14 +149,14 @@ export class CatKit {
 }
 
 /** Клип по имени из контракта. Отсутствие — поломка ассета, а не вариант. */
-export function clip(rig: CatRig, name: string): THREE.AnimationClip {
+export function clip(rig: CharacterRig, name: string): THREE.AnimationClip {
   const found = rig.clips.find((c) => c.name === name)
   if (found === undefined) throw new Error(`в ките нет клипа ${name}`)
   return found
 }
 
 /** Кость по имени из контракта. Отсутствие — поломка ассета, а не вариант. */
-export function bone(rig: CatRig, name: string): THREE.Bone {
+export function bone(rig: CharacterRig, name: string): THREE.Bone {
   const found = rig.bones.get(name) ?? rig.bones.get(sanitize(name))
   if (found === undefined) throw new Error(`в ките нет кости ${name}`)
   return found
