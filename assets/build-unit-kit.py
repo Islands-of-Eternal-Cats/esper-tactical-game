@@ -338,6 +338,11 @@ def retarget(src, src_act, dst, name, first, last, scale):
     hips = RIG + "Hips"
     src_hips_rest = (src_world @ src.data.bones[hips].matrix_local).to_translation()
     dst_hips_rest = (dst_world @ dst.data.bones[hips].matrix_local).to_translation()
+    # По вертикали — в масштабе высоты бёдер, а не роста: лежащее тело —
+    # это бёдра у самого пола, и после масштаба по росту у коротконогого
+    # кота они уходили под пол. По горизонтали — по росту, как и шаг.
+    scale_v = dst_hips_rest.z / src_hips_rest.z
+    scale_xy = Vector((scale, scale, scale_v))
 
     for f in range(int(first), int(last) + 1):
         bpy.context.scene.frame_set(f)
@@ -358,7 +363,8 @@ def retarget(src, src_act, dst, name, first, last, scale):
                 base = pose[db.parent.name] @ (db.parent.matrix_local.inverted() @ db.matrix_local)
             if n == hips:
                 moved = (src_world @ spb.matrix).to_translation() - src_hips_rest
-                target_arm.translation = dst_world_inv @ (dst_hips_rest + moved * scale)
+                moved = Vector((moved.x * scale_xy.x, moved.y * scale_xy.y, moved.z * scale_xy.z))
+                target_arm.translation = dst_world_inv @ (dst_hips_rest + moved)
             else:
                 target_arm.translation = base.to_translation()
             pose[n] = target_arm
