@@ -24,7 +24,7 @@ import {
   VACUUM_CAPACITY,
   WALK_MS_PER_CELL,
 } from './tuning'
-import { alive, orderHalt, orderMove, threatOf, tickUnits } from './units'
+import { alive, orderHalt, orderMove, signOf, threatOf, tickUnits } from './units'
 import { coverFrom } from './los'
 import { CONTAINER, buildGrid, placePiles } from './world'
 
@@ -534,6 +534,7 @@ export class Sim {
       cover: threat !== null && alive(u) && coverFrom(s.grid, u.cell, threat.cell),
       target: u.target,
       status: u.status,
+      sign: u.mode === 'dead' ? null : signOf(u.status),
     }
   }
 

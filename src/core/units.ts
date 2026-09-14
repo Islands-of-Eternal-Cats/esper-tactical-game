@@ -7,7 +7,7 @@
  * воспроизводим, а игроку такая асимметрия не видна.
  */
 
-import type { Cell } from '../shared/protocol'
+import type { Cell, UnitSign } from '../shared/protocol'
 import { hitChance, rollHit } from './combat'
 import { ORTHO, dirOf, octile, sameCell } from './grid'
 import { coverFrom, lineOfSight } from './los'
@@ -43,6 +43,20 @@ export const UNIT_STATUS = {
   far: 'цель вне дальности',
   dead: 'убит',
 } as const
+
+/** Знак по строке: строка — источник, знак — её сокращение, и расходиться им нельзя. */
+const SIGN_OF: ReadonlyMap<string, UnitSign> = new Map([
+  [UNIT_STATUS.pinned, 'pinned'],
+  [UNIT_STATUS.seek, 'seek'],
+  [UNIT_STATUS.reload, 'reload'],
+  [UNIT_STATUS.far, 'far'],
+  [UNIT_STATUS.stuck, 'stuck'],
+  [UNIT_STATUS.yield, 'yield'],
+])
+
+export function signOf(status: string): UnitSign | null {
+  return SIGN_OF.get(status) ?? null
+}
 
 export function unitById(state: State, id: string | null): Unit | null {
   if (id === null) return null

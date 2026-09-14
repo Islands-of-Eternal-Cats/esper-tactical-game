@@ -7,10 +7,11 @@
  */
 
 import * as THREE from 'three'
-import type { Dir, Event, Snapshot, UnitView, WorldView } from '../shared/protocol'
+import type { Dir, Event, Snapshot, UnitSign, UnitView, WorldView } from '../shared/protocol'
 import { Glide } from './glide'
 import { disposeTree } from './kit'
 import { PALETTE } from './palette'
+import { Signs } from './signs'
 
 const HEADING: Record<Dir, [number, number]> = {
   n: [0, -1],
@@ -51,11 +52,14 @@ class Figure {
   private readonly bar = new THREE.Group()
   private readonly pips: THREE.Mesh[] = []
   private readonly shield: THREE.Mesh
+  /** Знак над полоской: та же группа, тот же поворот к камере. */
+  private readonly sign: THREE.Mesh
+  private shown: UnitSign | null = null
   private phase = 0
   /** 0 — стоит, 1 — лежит. */
   private fallen = 0
 
-  constructor(color: number) {
+  constructor(color: number, private readonly signs: Signs) {
     this.root.add(this.body)
     this.body.add(this.lean)
 
@@ -90,6 +94,12 @@ class Figure {
     this.bar.position.y = 1.3
     this.root.add(this.bar)
 
+    this.sign = new THREE.Mesh(new THREE.PlaneGeometry(0.44, 0.44))
+    this.sign.position.y = 0.34
+    this.sign.renderOrder = 11
+    this.sign.visible = false
+    this.bar.add(this.sign)
+
     // Щиток — в сторону угрозы, у ног, без освещения: он знак, а не предмет.
     this.shield = new THREE.Mesh(
       new THREE.BoxGeometry(0.4, 0.26, 0.05),
@@ -118,6 +128,13 @@ class Figure {
 
   setCover(on: boolean): void {
     this.shield.visible = on
+  }
+
+  setSign(sign: UnitSign | null): void {
+    if (sign === this.shown) return
+    this.shown = sign
+    this.sign.visible = sign !== null
+    if (sign !== null) this.sign.material = this.signs.material(sign)
   }
 
   faceCamera(q: THREE.Quaternion): void {
@@ -198,6 +215,7 @@ export class Units {
   private readonly flashMat = new THREE.MeshBasicMaterial({ color: PALETTE.flash })
   private readonly flashGeo = new THREE.SphereGeometry(0.13, 8, 6)
   private readonly missMat = new THREE.MeshBasicMaterial({ color: PALETTE.tracer, transparent: true, opacity: 0.5 })
+  private readonly signs = new Signs()
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -220,6 +238,7 @@ export class Units {
     this.flashMat.dispose()
     this.missMat.dispose()
     this.flashGeo.dispose()
+    this.signs.dispose()
   }
 
   /** Экранная позиция юнита: для рамки выделения и трассеров. */
@@ -235,7 +254,10 @@ export class Units {
       let obj = this.objects.get(view.id)
       if (obj === undefined) {
         const [hx, hz] = HEADING[view.facing]
-        obj = { figure: new Figure(view.side === 'player' ? PALETTE.ally : PALETTE.foe), yaw: Math.atan2(hx, hz) }
+        obj = {
+          figure: new Figure(view.side === 'player' ? PALETTE.ally : PALETTE.foe, this.signs),
+          yaw: Math.atan2(hx, hz),
+        }
         this.objects.set(view.id, obj)
         this.root.add(obj.figure.root)
       }
@@ -266,6 +288,7 @@ export class Units {
     obj.figure.setYaw(obj.yaw)
     obj.figure.setHp(view.hp)
     obj.figure.setCover(view.cover)
+    obj.figure.setSign(view.sign)
     obj.figure.animate(view.action, dt)
   }
 
