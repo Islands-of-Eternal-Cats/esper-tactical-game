@@ -306,6 +306,7 @@ class ModelFigure implements Figure {
   private readonly gunAhead: number
   private readonly handR: THREE.Object3D | null
   private readonly handL: THREE.Object3D | null
+  private readonly chest: THREE.Object3D | null
   private readonly v1 = new THREE.Vector3()
   private readonly v2 = new THREE.Vector3()
 
@@ -352,10 +353,11 @@ class ModelFigure implements Figure {
       // их не костями, а простыми узлами — ищутся по имени в иерархии.
       this.handR = joint(rig, 'mixamorig:RightHand')
       this.handL = joint(rig, 'mixamorig:LeftHand')
+      this.chest = joint(rig, 'mixamorig:Spine1')
     } else {
       this.gun = null
       this.gunAhead = 0
-      this.handR = this.handL = null
+      this.handR = this.handL = this.chest = null
     }
 
     this.mixer = new THREE.AnimationMixer(rig.root)
@@ -417,14 +419,22 @@ class ModelFigure implements Figure {
   }
 
   private placeGun(action: UnitView['action']): void {
-    if (this.gun === null || this.handR === null || this.handL === null) return
+    if (this.gun === null || this.handR === null || this.handL === null || this.chest === null) return
     this.body.updateWorldMatrix(true, true)
+    if (action === 'move') {
+      // На бегу руки машут, и оружие в ладони прошивало бы грудь: оно
+      // держится у груди наискось — как несут перед собой на двух руках,
+      // не глядя на ладони. Ладони на бегу его не касаются, и ладно.
+      const chest = this.body.worldToLocal(this.chest.getWorldPosition(this.v1))
+      this.gun.position.copy(chest).add(CHEST_GRIP)
+      this.gun.quaternion.setFromUnitVectors(FORWARD, CHEST_DIR)
+      return
+    }
     const grip = this.body.worldToLocal(this.handR.getWorldPosition(this.v1))
     const twoHanded = action === 'aim' || action === 'fire'
-    // В прицеле — к левой ладони: обе на оружии. В покое и на бегу
-    // предплечье в клипах ходит как угодно (у кота на колене — вверх), и
-    // ствол за ним задирался в небо: направление берётся не от кости, а
-    // фиксированное в осях тела — вперёд и вниз, как носят на ремне.
+    // В прицеле — к левой ладони: обе на оружии. В покое предплечье в клипах
+    // ходит как угодно (у кота на колене — вверх), и ствол за ним задирался
+    // в небо: направление фиксированное в осях тела — вперёд и вниз.
     const dir = twoHanded ? this.body.worldToLocal(this.handL.getWorldPosition(this.v2)).sub(grip) : this.v2.copy(CARRY)
     if (dir.lengthSq() < 1e-6) return
     dir.normalize()
@@ -435,6 +445,9 @@ class ModelFigure implements Figure {
 
 /** Ствол в покое: вперёд по телу (+Z), вниз на ~35° и чуть влево, поперёк груди. */
 const CARRY = new THREE.Vector3(-0.25, -0.7, 1).normalize()
+/** На бегу: рукоять у правого бока груди, ствол наискось вверх-влево-вперёд. */
+const CHEST_GRIP = new THREE.Vector3(0.1, -0.02, 0.16)
+const CHEST_DIR = new THREE.Vector3(-0.6, 0.45, 0.55).normalize()
 const FORWARD = new THREE.Vector3(0, 0, 1)
 
 interface UnitObject {
