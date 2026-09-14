@@ -414,7 +414,7 @@ class ModelFigure implements Figure {
       current.timeScale = footSpeed !== null && speed > 0 ? speed / footSpeed : 1
     }
     this.mixer.update(dt)
-    this.placeGun(action)
+    this.placeGun()
   }
 
   /** Цикл бега — два шага: путь за клип пополам. */
@@ -425,22 +425,19 @@ class ModelFigure implements Figure {
     return footSpeed === null ? STANDIN_STRIDE : (footSpeed * current.getClip().duration) / 2
   }
 
-  private placeGun(action: UnitView['action']): void {
+  private placeGun(): void {
     if (this.gun === null || this.handR === null || this.handL === null) return
     this.body.updateWorldMatrix(true, true)
     const grip = this.body.worldToLocal(this.handR.getWorldPosition(this.v1))
-    // Бег в ките — «с винтовкой»: обе ладони держат оружие перед грудью,
-    // и без него кот машет пустыми руками. Поэтому на бегу, как и в
-    // прицеле, — от правой ладони к левой. В покое предплечье в клипах
-    // ходит как угодно (у кота на колене — вверх), и ствол за ним задирался
-    // в небо: направление фиксированное в осях тела — вперёд и вниз.
-    const twoHanded = action !== 'idle'
-    const dir = twoHanded ? this.body.worldToLocal(this.handL.getWorldPosition(this.v2)).sub(grip) : this.v2.copy(CARRY)
+    // Все клипы кита — «с винтовкой»: и в покое, и на бегу обе ладони на
+    // оружии, ствол — от правой к левой. Раньше покой шёл по фиксированному
+    // направлению «на ремне»: у перенесённых клипов рука висела где попало.
+    const dir = this.body.worldToLocal(this.handL.getWorldPosition(this.v2)).sub(grip)
     if (dir.lengthSq() < 1e-6) return
     dir.normalize()
     this.gun.position.copy(grip).addScaledVector(dir, this.gunAhead)
     this.gun.quaternion.setFromUnitVectors(FORWARD, dir)
-    if (!twoHanded || this.armL === null || this.foreArmL === null) return
+    if (this.armL === null || this.foreArmL === null) return
     // Левая ладонь — на цевьё. Клип задал направление, IK дотягивает кисть:
     // перенесённые на кота клипы кладут её рядом с оружием, но не на него.
     // `dir` живёт в v2 — цель считается в своём векторе, иначе она затрёт направление.
@@ -451,8 +448,6 @@ class ModelFigure implements Figure {
 
 const DOWN = new THREE.Vector3(0, -1, 0)
 
-/** Ствол в покое: вперёд по телу (+Z), вниз на ~35° и чуть влево, поперёк груди. */
-const CARRY = new THREE.Vector3(-0.25, -0.7, 1).normalize()
 const FORWARD = new THREE.Vector3(0, 0, 1)
 
 interface UnitObject {
