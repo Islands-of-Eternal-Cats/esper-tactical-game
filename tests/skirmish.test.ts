@@ -183,3 +183,20 @@ describe('занятость клеток', () => {
     }
   })
 })
+
+describe('ожидание у занятой клетки', () => {
+  it('ждущий не показывается идущим', () => {
+    const sim = new Sim(1, 'skirmish')
+    sim.move(['a1', 'a2'], { x: 3, y: 12 })
+    let waited = 0
+    for (let t = 0; t < 400; t++) {
+      sim.tick()
+      for (const u of sim.snapshot().units) {
+        if (u.status !== 'пропускает') continue
+        waited++
+        expect(u.action).not.toBe('move')
+      }
+    }
+    expect(waited).toBeGreaterThan(0)
+  })
+})

@@ -215,7 +215,7 @@ function trySeekCover(state: State, u: Unit): boolean {
  * прождав BLOCKED_MS — бросает маршрут, чтобы двое не стояли друг перед
  * другом вечно. `true` — маршрут кончился, так или иначе.
  */
-function step(state: State, u: Unit): boolean {
+function step(state: State, u: Unit, walking: string): boolean {
   const next = u.path[0]
   if (next !== undefined && u.progress === 0 && occupied(state, next, u)) {
     u.blockedMs += TICK_MS
@@ -228,7 +228,14 @@ function step(state: State, u: Unit): boolean {
     return true
   }
   u.blockedMs = 0
+  // Клетка освободилась — строка снова про ходьбу, а не про ожидание.
+  u.status = walking
   return advance(u, UNIT_MS_PER_CELL, (cell) => occupied(state, cell, u))
+}
+
+/** Чем занят идущий: свои выполняют приказ, противник ищет цель. */
+function walking(u: Unit): string {
+  return u.side === 'player' ? UNIT_STATUS.move : UNIT_STATUS.search
 }
 
 // ─── автомат ─────────────────────────────────────────────────────────────
@@ -250,7 +257,7 @@ function stepIdle(state: State, u: Unit): void {
     // Противник без цели наступает на ближайшего: иначе две стороны,
     // спрятавшиеся за стенами, простоят до конца времён.
     const enemy = nearestEnemy(state, u)
-    if (enemy !== null) beginMove(state, u, enemy.cell, UNIT_STATUS.search)
+    if (enemy !== null) beginMove(state, u, enemy.cell, walking(u))
     return
   }
   u.status = UNIT_STATUS.await
@@ -265,11 +272,11 @@ function stepMove(state: State, u: Unit): void {
     beginAim(u, t)
     return
   }
-  if (step(state, u)) u.mode = 'idle'
+  if (step(state, u, walking(u))) u.mode = 'idle'
 }
 
 function stepSeek(state: State, u: Unit): void {
-  if (step(state, u)) u.mode = 'idle'
+  if (step(state, u, UNIT_STATUS.seek)) u.mode = 'idle'
 }
 
 function stepAim(state: State, u: Unit): void {
@@ -289,7 +296,7 @@ function stepAim(state: State, u: Unit): void {
     // состояния говорит ему, что решение требуется.
     if (u.side === 'player') {
       u.status = UNIT_STATUS.far
-      if (u.path.length > 0) step(state, u)
+      if (u.path.length > 0) step(state, u, UNIT_STATUS.far)
       return
     }
     // Противник видит, но не достаёт — сближается, пока не достанет.
@@ -301,8 +308,7 @@ function stepAim(state: State, u: Unit): void {
       }
       setPath(u, path)
     }
-    u.status = UNIT_STATUS.close
-    step(state, u)
+    step(state, u, UNIT_STATUS.close)
     return
   }
 
@@ -310,7 +316,7 @@ function stepAim(state: State, u: Unit): void {
   if (u.path.length > 0) {
     u.path = stepInFlight(u)
     if (u.path.length > 0) {
-      step(state, u)
+      step(state, u, UNIT_STATUS.aim)
       return
     }
   }
@@ -364,7 +370,7 @@ export function orderMove(state: State, ids: readonly string[], cell: Cell): voi
   for (const id of ids) {
     const u = unitById(state, id)
     if (u === null || !alive(u)) continue
-    if (!beginMove(state, u, cell, UNIT_STATUS.move)) continue
+    if (!beginMove(state, u, cell, walking(u))) continue
     if (u.path.length === 0) u.mode = 'idle'
   }
 }

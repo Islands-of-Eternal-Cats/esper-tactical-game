@@ -507,11 +507,14 @@ export class Sim {
     let action: UnitView['action']
     switch (u.mode) {
       case 'seek':
-        action = 'move'
+      case 'move':
+        // Ждущий у занятой клетки стоит, а не идёт: иначе рендер ведёт его
+        // вперёд между снапшотами, а каждый тик отбрасывает назад — дрожь.
+        action = u.blockedMs > 0 ? 'idle' : 'move'
         break
       case 'aim':
         // Сближение — тоже прицеливание, но идти надо ногами, а не позой.
-        action = u.path.length > 0 ? 'move' : 'aim'
+        action = u.path.length > 0 && u.blockedMs === 0 ? 'move' : 'aim'
         break
       default:
         action = u.mode
