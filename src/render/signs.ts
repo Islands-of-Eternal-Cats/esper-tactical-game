@@ -22,7 +22,8 @@ function draw(sign: UnitSign, ctx: CanvasRenderingContext2D): void {
   ctx.lineCap = 'round'
   ctx.lineJoin = 'round'
   ctx.lineWidth = s * 0.09
-  ctx.strokeStyle = hex(sign === 'pinned' ? PALETTE.zone : PALETTE.select)
+  // Тревожный цвет — где юниту плохо: прижат или мечется без укрытия.
+  ctx.strokeStyle = hex(sign === 'pinned' || sign === 'seek' ? PALETTE.zone : PALETTE.select)
   ctx.fillStyle = ctx.strokeStyle
   ctx.beginPath()
   switch (sign) {
@@ -37,12 +38,18 @@ function draw(sign: UnitSign, ctx: CanvasRenderingContext2D): void {
       ctx.lineTo(s * 0.74, s * 0.78)
       break
     case 'seek':
-      // Щит: ищет укрытие.
-      ctx.moveTo(c, s * 0.18)
-      ctx.lineTo(s * 0.76, s * 0.3)
-      ctx.quadraticCurveTo(s * 0.76, s * 0.66, c, s * 0.84)
-      ctx.quadraticCurveTo(s * 0.24, s * 0.66, s * 0.24, s * 0.3)
+      // Щит со знаком вопроса: укрытия нет, ищет.
+      ctx.moveTo(c, s * 0.14)
+      ctx.lineTo(s * 0.8, s * 0.26)
+      ctx.quadraticCurveTo(s * 0.8, s * 0.68, c, s * 0.88)
+      ctx.quadraticCurveTo(s * 0.2, s * 0.68, s * 0.2, s * 0.26)
       ctx.closePath()
+      // Крючок вопроса — дуга сверху, хвост вниз к центру, точка.
+      ctx.moveTo(s * 0.4, s * 0.4)
+      ctx.arc(c, s * 0.4, s * 0.1, Math.PI, Math.PI * 2.5)
+      ctx.lineTo(c, s * 0.58)
+      ctx.moveTo(c, s * 0.7)
+      ctx.lineTo(c, s * 0.71)
       break
     case 'reload':
       // Дуга со стрелкой: перезарядка.
