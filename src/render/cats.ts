@@ -18,6 +18,7 @@ import { cellToWorld, disposeTree } from './kit'
 import { PALETTE } from './palette'
 import { Glide } from './glide'
 import { Hose } from './hose'
+import { audio } from './audio'
 
 /** Части, которые показывает Ржавый. Кит несёт и чужие — они гасятся. */
 const RUSTY_PARTS = ['head_rusty', 'body_stocky', 'gear_vacuum', 'held_vacuum'] as const
@@ -30,6 +31,10 @@ const ACTIONS: readonly CatView['action'][] = ['idle', 'walk', 'haul', 'work', '
 /** Отступ от контейнера на разгрузке, м, и время подхода/отхода, с. */
 const STANDOFF = 0.32
 const STANDOFF_S = 0.35
+/** Длина шага капсулы, м: у неё нет клипа, из которого её взять. */
+const STANDIN_STRIDE = 0.45
+/** Лапы, а не ботинки: шаг кота тише и выше. */
+const CAT_WEIGHT = 0.5
 
 /** Направление взгляда в плоскости земли. y растёт на юг. */
 const HEADING: Record<Dir, [number, number]> = {
@@ -85,6 +90,8 @@ interface Figure {
    * `speed` — скорость земли под котом, ед/с (0, когда стоит).
    */
   animate(action: CatView['action'], dt: number, speed: number): void
+  /** Сколько земли проходится за один шаг, м: по нему звучат шаги. */
+  stride(): number
 }
 
 // --------------------------------------------------------------------------
@@ -234,6 +241,14 @@ class ModelFigure implements Figure {
     this.syncHose(dt)
   }
 
+  /** Цикл ходьбы — два шага: путь за клип пополам. */
+  stride(): number {
+    const current = this.playing === null ? undefined : this.clips.get(this.playing)
+    if (current === undefined) return STANDIN_STRIDE
+    const footSpeed = footSpeedOf(current.getClip())
+    return footSpeed === null ? STANDIN_STRIDE : (footSpeed * current.getClip().duration) / 2
+  }
+
   /**
    * Концы шланга — обрубок на крышке ранца и верх рукояти раструба, в
    * локальных координатах пропсов (glTF: +Y вверх). Считается в системе
@@ -317,6 +332,10 @@ class StandInFigure implements Figure {
     this.head.rotation.y = offset
   }
 
+  stride(): number {
+    return STANDIN_STRIDE
+  }
+
   animate(action: CatView['action'], dt: number): void {
     // Скорость земли капсуле не нужна: у неё нет ног, чтобы скользить.
     this.phase += dt
@@ -360,6 +379,8 @@ interface CatObject {
   headYaw: number
   /** Отступ от контейнера на разгрузке, 0…1 от STANDOFF; подходит плавно. */
   standoff: number
+  /** Пройдено с прошлого шага, м: шаг звучит, когда набирается stride. */
+  walked: number
 }
 
 export class Cats {
@@ -414,7 +435,7 @@ export class Cats {
     for (const view of snap.cats) {
       let obj = this.objects.get(view.id)
       if (obj === undefined) {
-        obj = { figure: this.build(), yaw: 0, headYaw: 0, standoff: 0 }
+        obj = { figure: this.build(), yaw: 0, headYaw: 0, standoff: 0, walked: 0 }
         this.objects.set(view.id, obj)
         this.root.add(obj.figure.root)
       }
@@ -478,5 +499,23 @@ export class Cats {
     obj.figure.animate(view.action, dt, speed)
     // После анимации: микшер трогает те же кости и иначе затрёт поворот головы.
     obj.figure.setHeadYaw(obj.headYaw)
+    this.footsteps(obj, speed, dt)
+  }
+
+  /**
+   * Шаги — по пройденному пути, а не по таймеру: темп ног и так привязан к
+   * скорости земли, так что шаг раз в stride метров совпадает с контактом
+   * стопы с точностью до фазы клипа. С места первый шаг — через полшага.
+   */
+  private footsteps(obj: CatObject, speed: number, dt: number): void {
+    if (speed <= 0) {
+      obj.walked = obj.figure.stride() / 2
+      return
+    }
+    obj.walked += speed * dt
+    const stride = obj.figure.stride()
+    if (obj.walked < stride) return
+    obj.walked %= stride
+    audio.step(obj.figure.root.position.x, obj.figure.root.position.z, CAT_WEIGHT)
   }
 }

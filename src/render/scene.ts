@@ -14,6 +14,7 @@ import { Kit, worldToCell } from './kit'
 import { PALETTE } from './palette'
 import { Select } from './select'
 import { Units } from './units'
+import { audio } from './audio'
 
 export interface SceneHandlers {
   onIntent: (cell: Cell) => void
@@ -408,6 +409,7 @@ export class SceneView {
   /** `dt` — реальное время кадра в секундах, умноженное на скорость. */
   render(snap: Snapshot | null, dt: number): void {
     if (this.contextLost) return
+    audio.frame(this.view.camera)
     this.kit.flicker(dt)
     if (snap !== null) {
       this.snap = snap

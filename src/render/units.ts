@@ -13,6 +13,7 @@ import { disposeTree } from './kit'
 import { type CharacterKit, type CharacterRig, bone, clip } from './model'
 import { PALETTE } from './palette'
 import { Signs } from './signs'
+import { audio } from './audio'
 
 const HEADING: Record<Dir, [number, number]> = {
   n: [0, -1],
@@ -36,6 +37,10 @@ const CHEST = 0.62
 /** Труп ложится за столько секунд. */
 const FALL_S = 0.35
 const HP_MAX = 3
+/** Длина шага капсулы, м: у неё нет клипа, из которого её взять. */
+const STANDIN_STRIDE = 0.6
+/** Кот в перестрелке бежит на лапах — шаг тише, чем у Y Bot в ботинках. */
+const CAT_WEIGHT = 0.5
 
 function approachAngle(current: number, target: number, rate: number, dt: number): number {
   let d = target - current
@@ -55,6 +60,8 @@ interface Figure {
   setYaw(yaw: number): void
   /** `speed` — скорость земли под ногами, ед/с (0, когда стоит). */
   animate(action: UnitView['action'], dt: number, speed: number): void
+  /** Сколько земли проходится за один шаг, м: по нему звучат шаги. */
+  stride(): number
 }
 
 /**
@@ -173,6 +180,10 @@ class StandInFigure implements Figure {
 
   setYaw(yaw: number): void {
     this.body.rotation.y = yaw
+  }
+
+  stride(): number {
+    return STANDIN_STRIDE
   }
 
   animate(action: UnitView['action'], dt: number): void {
@@ -377,6 +388,14 @@ class ModelFigure implements Figure {
     this.placeGun(action)
   }
 
+  /** Цикл бега — два шага: путь за клип пополам. */
+  stride(): number {
+    const current = this.playing === null ? undefined : this.clips.get(this.playing)
+    if (current === undefined) return STANDIN_STRIDE
+    const footSpeed = footSpeedOf(current.getClip())
+    return footSpeed === null ? STANDIN_STRIDE : (footSpeed * current.getClip().duration) / 2
+  }
+
   private placeGun(action: UnitView['action']): void {
     if (this.gun === null || this.handR === null || this.handL === null || this.foreArmR === null) return
     this.body.updateWorldMatrix(true, true)
@@ -401,6 +420,8 @@ interface UnitObject {
   yaw: number
   /** Умер капсулой — и остаётся ею, даже когда кит приехал. */
   dead: boolean
+  /** Пройдено с прошлого шага, м: шаг звучит, когда набирается stride. */
+  walked: number
 }
 
 interface Tracer {
@@ -499,7 +520,7 @@ export class Units {
       let obj = this.objects.get(view.id)
       if (obj === undefined) {
         const [hx, hz] = HEADING[view.facing]
-        obj = { figure: this.build(view.side), side: view.side, yaw: Math.atan2(hx, hz), dead: false }
+        obj = { figure: this.build(view.side), side: view.side, yaw: Math.atan2(hx, hz), dead: false, walked: 0 }
         this.objects.set(view.id, obj)
         this.root.add(obj.figure.root)
       }
@@ -533,6 +554,21 @@ export class Units {
     obj.figure.overlay.setSign(view.sign)
     if (view.action === 'dead') obj.dead = true
     obj.figure.animate(view.action, dt, speed)
+    this.footsteps(obj, speed, dt)
+  }
+
+  /** Шаги по пройденному пути — как у кота во дворе; см. Cats.footsteps. */
+  private footsteps(obj: UnitObject, speed: number, dt: number): void {
+    if (speed <= 0) {
+      obj.walked = obj.figure.stride() / 2
+      return
+    }
+    obj.walked += speed * dt
+    const stride = obj.figure.stride()
+    if (obj.walked < stride) return
+    obj.walked %= stride
+    const isCat = obj.side === 'player' && this.catKit !== null && this.kit !== null
+    audio.step(obj.figure.root.position.x, obj.figure.root.position.z, isCat ? CAT_WEIGHT : 1)
   }
 
   private play(e: Event): void {
@@ -541,6 +577,7 @@ export class Units {
     const to = this.positionOf(e.to)
     if (from === null || to === null) return
 
+    audio.shot(from.x, from.z)
     this.a.set(from.x, CHEST, from.z)
     this.b.set(to.x, CHEST, to.z)
     const tracer = new THREE.Mesh(this.tracerGeo, this.tracerMat)
