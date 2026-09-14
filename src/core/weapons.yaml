@@ -32,10 +32,10 @@ smg:
   name: автомат
   fireRange: 6
   aimMs: 500
-  reloadMs: 1000
+  reloadMs: 900
   fireMs: 100
-  hitBase: 320
-  hitPerCell: -45
+  hitBase: 380
+  hitPerCell: -40
   coverMul: 350
   damage: 1
   burst: 3
