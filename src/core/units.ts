@@ -134,6 +134,8 @@ function beginAim(u: Unit, t: Unit): void {
   u.mode = 'aim'
   u.target = t.id
   u.waitMs = AIM_MS
+  // Выстрелы по этой цели: до первого — «целится», после — «перезарядка».
+  u.shots = 0
   u.status = UNIT_STATUS.aim
   u.facing = dirOf(u.cell, t.cell) ?? u.facing
 }

@@ -76,7 +76,7 @@ export interface Unit extends Mover {
   seekCooldownMs: number
   /** Сколько уже ждёт перед занятой клеткой. */
   blockedMs: number
-  /** Выстрелов сделано: «целится» до первого, «перезарядка» после. */
+  /** Выстрелов по текущей цели: «целится» до первого, «перезарядка» после. */
   shots: number
   status: string
 }
