@@ -10,7 +10,8 @@ import * as THREE from 'three'
 import type { Dir, Event, Snapshot, UnitSign, UnitView, WorldView } from '../shared/protocol'
 import { Glide } from './glide'
 import { disposeTree } from './kit'
-import { assembleGun } from './guns'
+import { assembleGun, holdOf } from './guns'
+import { reach } from './ik'
 import { type CharacterKit, type CharacterRig, type GunKit, clip, joint } from './model'
 import { PALETTE } from './palette'
 import { Signs } from './signs'
@@ -306,6 +307,10 @@ class ModelFigure implements Figure {
   private readonly gunAhead: number
   private readonly handR: THREE.Object3D | null
   private readonly handL: THREE.Object3D | null
+  private readonly armL: THREE.Object3D | null
+  private readonly foreArmL: THREE.Object3D | null
+  /** Где на оружии лежит левая ладонь: вперёд от рукояти, м. */
+  private readonly hold: number
   private readonly v1 = new THREE.Vector3()
   private readonly v2 = new THREE.Vector3()
 
@@ -343,19 +348,24 @@ class ModelFigure implements Figure {
         stub.castShadow = true
         this.gun = stub
         this.gunAhead = GUN_AHEAD
+        this.hold = GUN_AHEAD + GUN_LENGTH * 0.2
       } else {
         this.gun = gun
         this.gunAhead = 0
+        this.hold = holdOf(gun)
       }
       this.body.add(this.gun)
       // Не `bone()`: у Y Bot кисти и пальцы без весов, и загрузчик делает
       // их не костями, а простыми узлами — ищутся по имени в иерархии.
       this.handR = joint(rig, 'mixamorig:RightHand')
       this.handL = joint(rig, 'mixamorig:LeftHand')
+      this.armL = joint(rig, 'mixamorig:LeftArm')
+      this.foreArmL = joint(rig, 'mixamorig:LeftForeArm')
     } else {
       this.gun = null
       this.gunAhead = 0
-      this.handR = this.handL = null
+      this.hold = 0
+      this.handR = this.handL = this.armL = this.foreArmL = null
     }
 
     this.mixer = new THREE.AnimationMixer(rig.root)
@@ -431,8 +441,15 @@ class ModelFigure implements Figure {
     dir.normalize()
     this.gun.position.copy(grip).addScaledVector(dir, this.gunAhead)
     this.gun.quaternion.setFromUnitVectors(FORWARD, dir)
+    if (!twoHanded || this.armL === null || this.foreArmL === null) return
+    // Левая ладонь — на цевьё. Клип задал направление, IK дотягивает кисть:
+    // перенесённые на кота клипы кладут её рядом с оружием, но не на него.
+    const target = this.body.localToWorld(this.v2.copy(grip).addScaledVector(dir, this.hold))
+    reach(this.armL, this.foreArmL, this.handL, target, DOWN)
   }
 }
+
+const DOWN = new THREE.Vector3(0, -1, 0)
 
 /** Ствол в покое: вперёд по телу (+Z), вниз на ~35° и чуть влево, поперёк груди. */
 const CARRY = new THREE.Vector3(-0.25, -0.7, 1).normalize()

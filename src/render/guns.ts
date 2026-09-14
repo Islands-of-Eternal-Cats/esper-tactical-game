@@ -23,6 +23,12 @@ const GRIP_RISE = 0.1
 
 const AXIS_Y = new THREE.Vector3(0, 1, 0)
 
+/** Куда кладётся левая ладонь: вперёд от рукояти, м. Считается по длине переда. */
+export function holdOf(gun: THREE.Object3D): number {
+  const v: unknown = gun.userData['hold']
+  return typeof v === 'number' ? v : 0.15
+}
+
 export function assembleGun(kit: GunKit, look: WeaponLook): THREE.Group {
   const sockets = kit.socketsOf(look.body)
   const grip = sockets['grip'] ?? [0, 0, 0]
@@ -49,5 +55,10 @@ export function assembleGun(kit: GunKit, look: WeaponLook): THREE.Group {
   const gun = new THREE.Group()
   gun.scale.setScalar(GUN_SCALE)
   gun.add(turn)
+  // Цевьё — на 60 % длины переда от рукояти: и у короткого автомата, и у
+  // снайперской ладонь ложится где ей место.
+  // Бокс — в осях `turn`: части уже сдвинуты на минус рукоять, и max.x — перед.
+  const box = new THREE.Box3().setFromObject(assembly)
+  gun.userData['hold'] = Math.max(0.05, box.max.x * 0.6 * GUN_SCALE)
   return gun
 }
