@@ -225,6 +225,31 @@ describe('выбор цели', () => {
   })
 })
 
+describe('ответный огонь', () => {
+  it('свой, в которого стреляет недосягаемая цель, сближается, а не терпит', () => {
+    // Дробовик против винтовки: по коту стреляют оттуда, куда он не достаёт.
+    // Через тик после выстрела он не может стоять со знаком «вне дальности».
+    let checked = 0
+    for (let seed = 1; seed <= 6; seed++) {
+      const sim = new Sim(seed, 'skirmish')
+      let pending: { to: string; from: string }[] = []
+      for (let t = 0; t < 1500; t++) {
+        sim.tick()
+        const snap = sim.snapshot()
+        for (const { to, from } of pending) {
+          const u = snap.units.find((v) => v.id === to)!
+          if (u.action === 'dead' || u.target !== from) continue
+          expect(u.status).not.toBe('цель вне дальности')
+          checked++
+        }
+        pending = snap.events.flatMap((e) => (e.t === 'shot' && e.to.startsWith('a') ? [{ to: e.to, from: e.from }] : []))
+        if (alive(snap).size < 2) break
+      }
+    }
+    expect(checked).toBeGreaterThan(0)
+  })
+})
+
 describe('обход', () => {
   it('юнит обходит стоящего на пути товарища, а не ждёт', () => {
     const sim = new Sim(1, 'skirmish')

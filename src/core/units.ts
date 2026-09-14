@@ -339,13 +339,16 @@ function stepAim(state: State, u: Unit): void {
   if (!inFireRange(u, t)) {
     u.waitMs = weaponOf(u.weapon).aimMs
     // Свои не сближаются сами: куда идти — решение игрока, и строка
-    // состояния говорит ему, что решение требуется.
-    if (u.side === 'player') {
+    // состояния говорит ему, что решение требуется. Исключение — по нему
+    // стреляет тот, кого он не достаёт: терпеть, пока не убьют, — не
+    // дисциплина, а гибель; ответный огонь требует подойти.
+    const outgunned = u.underFireMs > 0 && u.threat === t.id
+    if (u.side === 'player' && !outgunned) {
       u.status = UNIT_STATUS.far
       if (u.path.length > 0) step(state, u, UNIT_STATUS.far)
       return
     }
-    // Противник видит, но не достаёт — сближается, пока не достанет.
+    // Видит, но не достаёт — сближается, пока не достанет.
     if (u.path.length === 0) {
       const path = state.grid.findPath(origin(u), t.cell)
       if (path === null) {
