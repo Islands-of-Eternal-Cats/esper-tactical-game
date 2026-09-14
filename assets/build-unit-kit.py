@@ -315,8 +315,11 @@ def retarget(src, src_act, dst, name, first, last, scale):
     dst_world_inv = dst_world.inverted()
     pairs = []
     # Порядок — родители раньше детей: поза потомка считается от позы родителя.
+    # Голова не переносится — как и в клипах самого кота: у него короткая
+    # шея и огромная голова, и запрокинутая по-человечески голова читается
+    # как оторванная. Голова идёт за шеей; взгляд — дело рантайма.
     for bone in dst.data.bones:
-        if bone.name not in src.data.bones:
+        if bone.name not in src.data.bones or bone.name == RIG + "Head":
             continue
         depth = 0
         p = bone.parent
