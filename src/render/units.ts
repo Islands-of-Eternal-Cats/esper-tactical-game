@@ -304,8 +304,8 @@ class ModelFigure implements Figure {
   private readonly gunAhead: number
   private readonly handR: THREE.Object3D | null
   private readonly handL: THREE.Object3D | null
-  /** Расстояние от рукояти до цевья, м: по нему оружие масштабируется под ладони клипа. */
-  private readonly hold: number
+  /** Точка цевья относительно рукояти, в осях оружия, м — куда ложится левая ладонь. */
+  private readonly hold: THREE.Vector3
   /** Базовый масштаб модели оружия, как собрана. */
   private readonly gunScale: number
   private readonly v1 = new THREE.Vector3()
@@ -346,7 +346,7 @@ class ModelFigure implements Figure {
         stub.castShadow = true
         this.gun = stub
         this.gunAhead = GUN_AHEAD
-        this.hold = 0
+        this.hold = new THREE.Vector3(0, 0, GUN_AHEAD + GUN_LENGTH * 0.2)
         this.gunScale = 1
       } else {
         this.gun = gun
@@ -362,7 +362,7 @@ class ModelFigure implements Figure {
     } else {
       this.gun = null
       this.gunAhead = 0
-      this.hold = 0
+      this.hold = new THREE.Vector3()
       this.gunScale = 1
       this.handR = this.handL = null
     }
@@ -435,24 +435,30 @@ class ModelFigure implements Figure {
     if (this.gun === null || this.handR === null || this.handL === null) return
     this.body.updateWorldMatrix(true, true)
     const grip = this.body.worldToLocal(this.handR.getWorldPosition(this.v1))
-    // Клипы кита — «с винтовкой», обе ладони уже поставлены под оружие:
-    // рукоять в правой, ствол к левой, верх — по телу. Никакой IK: клип
-    // авторский, ему виднее. Размер — под ладони: цевьё модели ложится в
-    // левую ладонь при том расстоянии между руками, какое даёт клип.
-    const dir = this.body.worldToLocal(this.handL.getWorldPosition(this.v2)).sub(grip)
-    const span = dir.length()
+    // Клипы кита — «с винтовкой», обе ладони уже поставлены под оружие, и
+    // никакой IK: клип авторский. Оружие ставится по двум точкам: рукоять —
+    // в правую ладонь, цевьё — в левую. Цевьё выше рукояти (коробка над
+    // пистолетной рукоятью), поэтому ствол — не линия ладоней, а она же,
+    // повёрнутая на угол «рукоять — цевьё» в осях оружия; длина между
+    // точками подгоняется масштабом.
+    const d = this.body.worldToLocal(this.handL.getWorldPosition(this.v2)).sub(grip)
+    const span = d.length()
     if (span < 1e-3) return
-    dir.divideScalar(span)
-    LOOK.lookAt(dir, ZERO, UP)
+    d.divideScalar(span)
+    const hold = this.hold.length()
+    const pitch = hold > 0 ? Math.atan2(this.hold.y, this.hold.z) : 0
+    // Верх, перпендикулярный линии ладоней, в плоскости с вертикалью тела.
+    const up = this.v3.copy(UP).addScaledVector(d, -UP.dot(d))
+    if (up.lengthSq() < 1e-6) up.set(0, 0, -1)
+    up.normalize()
+    const fwd = d.multiplyScalar(Math.cos(pitch)).addScaledVector(up, -Math.sin(pitch))
+    LOOK.lookAt(fwd, ZERO, UP)
     this.gun.quaternion.setFromRotationMatrix(LOOK)
-    this.gun.position.copy(grip).addScaledVector(dir, this.gunAhead).addScaledVector(UP, -GUN_DROP)
-    // Множитель поверх базового масштаба модели, в разумных пределах.
-    if (this.hold > 0) this.gun.scale.setScalar(this.gunScale * Math.min(1.25, Math.max(0.8, span / this.hold)))
+    this.gun.position.copy(grip).addScaledVector(fwd, this.gunAhead)
+    if (hold > 0) this.gun.scale.setScalar(this.gunScale * Math.min(1.25, Math.max(0.8, span / hold)))
   }
 }
 
-/** Оружие держится ниже ладони: рука на рукояти выше её низа, коробка — над рукой. */
-const GUN_DROP = 0.03
 const ZERO = new THREE.Vector3()
 const UP = new THREE.Vector3(0, 1, 0)
 const LOOK = new THREE.Matrix4()
