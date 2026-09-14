@@ -263,24 +263,15 @@ function footSpeedOf(clip: THREE.AnimationClip): number | null {
   return typeof v === 'number' && v > 0 ? v : null
 }
 
-/** Ствол в ладони: смещение и поворот в системе кости `RightHand`. */
-interface Gun {
-  x: number
-  y: number
-  z: number
-  rx: number
-  ry: number
-  rz: number
-}
-
 /**
- * У кота ось Y ладони идёт к пальцам, и в прицеле — вперёд, а в покое —
- * вниз; ствол лежит вдоль неё. Центр смещён к пальцам: за рукоять держат
- * ближе к прикладу, и в покое ружьё висит стволом вниз, а не торчит вверх
- * вдоль предплечья.
+ * Винтовка кота. Не на кости ладони: после ретаргета запястье крутится
+ * непредсказуемо, и ствол, повторяющий его, смотрит куда угодно. Вместо
+ * этого ствол каждый кадр строится по положениям костей: в прицеле — от
+ * правой ладони к левой (обе лежат на винтовке), иначе — вдоль предплечья.
  */
-const CAT_GUN: Gun = { x: 0, y: 0.07, z: 0.02, rx: -Math.PI / 2, ry: 0, rz: 0 }
 const GUN_LENGTH = 0.42
+/** Насколько центр ствола впереди правой ладони: за рукоять держат у приклада. */
+const GUN_AHEAD = 0.08
 
 class ModelFigure implements Figure {
   readonly root = new THREE.Group()
@@ -290,6 +281,12 @@ class ModelFigure implements Figure {
   private readonly clips = new Map<UnitView['action'], THREE.AnimationAction>()
   private readonly material: THREE.MeshLambertMaterial | null
   private playing: UnitView['action'] | null = null
+  private readonly gun: THREE.Mesh | null
+  private readonly handR: THREE.Bone | null
+  private readonly handL: THREE.Bone | null
+  private readonly foreArmR: THREE.Bone | null
+  private readonly v1 = new THREE.Vector3()
+  private readonly v2 = new THREE.Vector3()
 
   /**
    * `clipsOf(action)` — откуда брать клип: у Y Bot всё из одного кита, у
@@ -302,7 +299,7 @@ class ModelFigure implements Figure {
     color: number | null,
     height: number,
     signs: Signs,
-    gun: Gun | null,
+    armed: boolean,
   ) {
     this.root.add(this.body)
     this.body.add(rig.root)
@@ -314,18 +311,19 @@ class ModelFigure implements Figure {
       }
     })
 
-    if (gun !== null) {
-      // Ствол — в правой ладони: клипы Mixamo держат винтовку обеими
-      // руками, левая ложится на цевьё сама. Оси — в системе кости.
-      const hand = bone(rig, 'mixamorig:RightHand')
-      const mesh = new THREE.Mesh(
+    if (armed) {
+      this.gun = new THREE.Mesh(
         new THREE.BoxGeometry(0.035, 0.05, GUN_LENGTH),
         new THREE.MeshLambertMaterial({ color: PALETTE.hose }),
       )
-      mesh.position.set(gun.x, gun.y, gun.z)
-      mesh.rotation.set(gun.rx, gun.ry, gun.rz)
-      mesh.castShadow = true
-      hand.add(mesh)
+      this.gun.castShadow = true
+      this.body.add(this.gun)
+      this.handR = bone(rig, 'mixamorig:RightHand')
+      this.handL = bone(rig, 'mixamorig:LeftHand')
+      this.foreArmR = bone(rig, 'mixamorig:RightForeArm')
+    } else {
+      this.gun = null
+      this.handR = this.handL = this.foreArmR = null
     }
 
     this.mixer = new THREE.AnimationMixer(rig.root)
@@ -375,8 +373,26 @@ class ModelFigure implements Figure {
       current.timeScale = footSpeed !== null && speed > 0 ? speed / footSpeed : 1
     }
     this.mixer.update(dt)
+    this.placeGun(action)
+  }
+
+  private placeGun(action: UnitView['action']): void {
+    if (this.gun === null || this.handR === null || this.handL === null || this.foreArmR === null) return
+    this.body.updateWorldMatrix(true, true)
+    const grip = this.body.worldToLocal(this.handR.getWorldPosition(this.v1))
+    const twoHanded = action === 'aim' || action === 'fire'
+    const other = this.body.worldToLocal((twoHanded ? this.handL : this.foreArmR).getWorldPosition(this.v2))
+    // Направление: к левой ладони, когда обе на винтовке; иначе от локтя к
+    // ладони — ружьё висит вдоль предплечья, стволом вниз.
+    const dir = twoHanded ? other.sub(grip) : grip.clone().sub(other)
+    if (dir.lengthSq() < 1e-6) return
+    dir.normalize()
+    this.gun.position.copy(grip).addScaledVector(dir, GUN_AHEAD)
+    this.gun.quaternion.setFromUnitVectors(FORWARD, dir)
   }
 }
+
+const FORWARD = new THREE.Vector3(0, 0, 1)
 
 interface UnitObject {
   figure: Figure
@@ -447,10 +463,10 @@ export class Units {
       const combat = this.kit
       const clipOf = (action: UnitView['action']): THREE.AnimationClip =>
         action === 'idle' ? clip(rig, 'idle') : combat.clip(`cat_${CLIP_OF[action]}`)
-      return new ModelFigure(rig, clipOf, null, CAT_HEIGHT, this.signs, CAT_GUN)
+      return new ModelFigure(rig, clipOf, null, CAT_HEIGHT, this.signs, true)
     }
     const rig = this.kit.spawn(['unit_body'])
-    return new ModelFigure(rig, (action) => clip(rig, CLIP_OF[action]), color, MODEL_HEIGHT, this.signs, null)
+    return new ModelFigure(rig, (action) => clip(rig, CLIP_OF[action]), color, MODEL_HEIGHT, this.signs, false)
   }
 
   dispose(): void {
