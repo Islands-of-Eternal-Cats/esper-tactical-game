@@ -24,6 +24,14 @@ export type Speed = 0 | 0.1 | 0.5 | 1 | 3
  */
 export const DEFAULT_ZONE_RADIUS = 4
 
+/**
+ * Срез, который живёт в симуляции: `yard` — кот и кучи («Ржавый»),
+ * `skirmish` — юниты и перестрелка. Выбирается при сбросе.
+ */
+export type Mode = 'yard' | 'skirmish'
+
+export type Side = 'player' | 'enemy'
+
 // ─── главный поток → воркер ──────────────────────────────────────────────
 
 export type Command =
@@ -33,6 +41,11 @@ export type Command =
   | { t: 'reset'; seed: number }
   /** Отладка: весь мусор исчезает — посмотреть, что кот делает без работы. */
   | { t: 'debugClearPiles' }
+  /** Перестрелка: приказ выделенным идти в клетку. Цель при этом сбрасывается. */
+  | { t: 'move'; units: string[]; cell: Cell }
+  | { t: 'halt'; units: string[] }
+  /** Выбор среза: сбрасывает симуляцию на текущем сиде. */
+  | { t: 'setMode'; mode: Mode }
 
 // ─── воркер → главный поток ──────────────────────────────────────────────
 
@@ -55,6 +68,7 @@ export interface PropView {
 
 export interface WorldView {
   seed: number
+  mode: Mode
   width: number
   height: number
   walls: Cell[]
@@ -72,8 +86,11 @@ export interface PileView {
   reserved: boolean
 }
 
-export interface CatView {
-  id: string
+/**
+ * Поля движения — общие у кота и юнита, вплоть до имён: сглаживание и
+ * интерполяция в рендере подключаются к любому из них без изменений.
+ */
+export interface MoveView {
   cell: Cell
   /** Откуда пришёл в `cell`; null в начале и после загрузки. Для сглаживания. */
   prev: Cell | null
@@ -94,6 +111,10 @@ export interface CatView {
    */
   stepMs: number
   facing: Dir
+}
+
+export interface CatView extends MoveView {
+  id: string
   /** Единственный источник выбора анимации. Ввод игрока на него не влияет. */
   action: 'idle' | 'walk' | 'work' | 'haul' | 'dump'
   /** Цель внимания — для поворота головы. */
@@ -104,12 +125,36 @@ export interface CatView {
   capacity: number
 }
 
+export interface UnitView extends MoveView {
+  id: string
+  side: Side
+  /** Единственный источник анимации, как и у кота. */
+  action: 'idle' | 'move' | 'aim' | 'fire' | 'dead'
+  hp: number
+  /** Укрыт от своей текущей угрозы. Игрок должен это видеть, иначе штраф — невидимая механика. */
+  cover: boolean
+  target: string | null
+  /** Одна строка: почему он делает то, что делает. «Прижат огнём» объясняет, «стоит» — раздражает. */
+  status: string
+}
+
+/**
+ * Событие тика: рендер проигрывает и забывает. В состоянии не хранится —
+ * выстрел живёт один тик, и в хеш детерминизма он не попадает.
+ */
+export type Event =
+  | { t: 'shot'; from: string; to: string; hit: boolean }
+  | { t: 'died'; unit: string }
+
 export interface Snapshot {
   tick: number
   cats: CatView[]
   piles: PileView[]
   zone: { cell: Cell; radius: number } | null
   totals: { remaining: number; collected: number }
+  units: UnitView[]
+  /** Всё, что случилось с прошлого снапшота: пачка тиков не теряет трассеров. */
+  events: Event[]
 }
 
 export type WorkerMessage =

@@ -10,11 +10,12 @@
 
 import { Sim } from '../core/sim'
 import { MAX_STEPS, TICK_MS } from '../core/tuning'
-import type { Command, Speed, WorkerMessage } from '../shared/protocol'
+import type { Command, Mode, Speed, WorkerMessage } from '../shared/protocol'
 
 const FRAME_MS = 16
 
-let sim = new Sim(1)
+let mode: Mode = 'yard'
+let sim = new Sim(1, mode)
 let speed: Speed = 1
 let acc = 0
 let last = performance.now()
@@ -66,8 +67,24 @@ self.onmessage = (e: MessageEvent<Command>): void => {
       sim.debugClearPiles()
       post({ t: 'snapshot', snap: sim.snapshot() })
       break
+    case 'move':
+      sim.move(cmd.units, cmd.cell)
+      post({ t: 'snapshot', snap: sim.snapshot() })
+      break
+    case 'halt':
+      sim.halt(cmd.units)
+      post({ t: 'snapshot', snap: sim.snapshot() })
+      break
+    case 'setMode':
+      // Смена среза — это новый двор на том же сиде, а не переключатель.
+      mode = cmd.mode
+      sim = new Sim(sim.world().seed, mode)
+      acc = 0
+      last = performance.now()
+      announce()
+      break
     case 'reset':
-      sim = new Sim(cmd.seed)
+      sim = new Sim(cmd.seed, mode)
       acc = 0
       last = performance.now()
       announce()

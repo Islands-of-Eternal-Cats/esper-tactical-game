@@ -191,6 +191,25 @@ export class Grid {
     return null
   }
 
+  /**
+   * Путь к клетке или, если она занята, к ближайшей свободной рядом с ней.
+   *
+   * Клик по стене или контейнеру — тоже намерение: идти туда настолько,
+   * насколько можно, а не отказываться.
+   */
+  findPathNear(from: Cell, to: Cell): Cell[] | null {
+    if (!this.isBlocked(to.x, to.y)) return this.findPath(from, to)
+    let best: Cell[] | null = null
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dy === 0) continue
+        const path = this.findPath(from, { x: to.x + dx, y: to.y + dy })
+        if (path !== null && (best === null || path.length < best.length)) best = path
+      }
+    }
+    return best
+  }
+
   private rebuild(start: number, goal: number): Cell[] {
     const out: Cell[] = []
     let n = goal

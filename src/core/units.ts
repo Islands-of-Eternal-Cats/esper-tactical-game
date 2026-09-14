@@ -1,0 +1,393 @@
+/**
+ * Автомат юнита поверх `mover`: ищет цель, целится, стреляет, прячется.
+ *
+ * Всё в клетках и тиках; единственная случайность — бросок при выстреле.
+ * Юниты обходятся по порядку массива (он отсортирован по id), и два юнита,
+ * стреляющие друг в друга в один тик, разрешаются этим порядком: результат
+ * воспроизводим, а игроку такая асимметрия не видна.
+ */
+
+import type { Cell } from '../shared/protocol'
+import { hitChance, rollHit } from './combat'
+import { ORTHO, dirOf, octile, sameCell } from './grid'
+import { coverFrom, lineOfSight } from './los'
+import { advance, origin, setPath, stepInFlight } from './mover'
+import type { State, Unit } from './state'
+import {
+  AIM_MS,
+  BLOCKED_MS,
+  COVER_RADIUS,
+  FIRE_MS,
+  FIRE_RANGE,
+  RELOAD_MS,
+  SIGHT_RANGE,
+  TICK_MS,
+  UNDER_FIRE_MS,
+  UNIT_MS_PER_CELL,
+} from './tuning'
+
+/** Юнит, который «просто стоит», раздражает; «прижат огнём» — объясняет. */
+export const UNIT_STATUS = {
+  await: 'ждёт приказа',
+  search: 'ищет цель',
+  move: 'выдвигается',
+  aim: 'целится',
+  reload: 'перезарядка',
+  fire: 'стреляет',
+  close: 'сближается',
+  seek: 'ищет укрытие',
+  pinned: 'прижат огнём',
+  yield: 'пропускает',
+  stuck: 'не могу подойти',
+  halt: 'стоит',
+  far: 'цель вне дальности',
+  dead: 'убит',
+} as const
+
+export function unitById(state: State, id: string | null): Unit | null {
+  if (id === null) return null
+  for (const u of state.units) if (u.id === id) return u
+  return null
+}
+
+export function alive(u: Unit): boolean {
+  return u.mode !== 'dead'
+}
+
+/** Клетка занята живым юнитом — стоящим в ней или уже шагнувшим в неё. */
+function occupied(state: State, cell: Cell, self: Unit): boolean {
+  for (const v of state.units) {
+    if (v === self || !alive(v)) continue
+    if (sameCell(v.cell, cell)) return true
+    const step = v.path[0]
+    if (v.progress > 0 && step !== undefined && sameCell(step, cell)) return true
+  }
+  return false
+}
+
+function visible(state: State, u: Unit, other: Unit): boolean {
+  return octile(u.cell, other.cell) <= SIGHT_RANGE * ORTHO && lineOfSight(state.grid, u.cell, other.cell)
+}
+
+function inFireRange(u: Unit, other: Unit): boolean {
+  return octile(u.cell, other.cell) <= FIRE_RANGE * ORTHO
+}
+
+/**
+ * Цель: прежняя, пока видна, иначе ближайшая видимая. Ничья — по id.
+ * Прилипчивость нужна, чтобы прицел не прыгал между двумя равноудалёнными.
+ */
+function acquire(state: State, u: Unit): Unit | null {
+  const current = unitById(state, u.target)
+  if (current !== null && alive(current) && visible(state, u, current)) return current
+  let best: Unit | null = null
+  let bestD = 0
+  for (const v of state.units) {
+    if (v.side === u.side || !alive(v) || !visible(state, u, v)) continue
+    const d = octile(u.cell, v.cell)
+    if (best === null || d < bestD || (d === bestD && v.id < best.id)) {
+      best = v
+      bestD = d
+    }
+  }
+  return best
+}
+
+/** Ближайший живой противник, видимый или нет. Для наступления. */
+function nearestEnemy(state: State, u: Unit): Unit | null {
+  let best: Unit | null = null
+  let bestD = 0
+  for (const v of state.units) {
+    if (v.side === u.side || !alive(v)) continue
+    const d = octile(u.cell, v.cell)
+    if (best === null || d < bestD || (d === bestD && v.id < best.id)) {
+      best = v
+      bestD = d
+    }
+  }
+  return best
+}
+
+// ─── переходы ────────────────────────────────────────────────────────────
+
+function beginAim(u: Unit, t: Unit): void {
+  u.mode = 'aim'
+  u.target = t.id
+  u.waitMs = AIM_MS
+  u.status = UNIT_STATUS.aim
+  u.facing = dirOf(u.cell, t.cell) ?? u.facing
+}
+
+/** Путь к клетке; `true` — маршрут назначен (возможно, пустой). */
+function beginMove(state: State, u: Unit, cell: Cell, status: string): boolean {
+  const path = state.grid.findPathNear(origin(u), cell)
+  if (path === null) {
+    u.status = UNIT_STATUS.stuck
+    return false
+  }
+  setPath(u, path)
+  u.mode = 'move'
+  u.target = null
+  u.blockedMs = 0
+  u.status = status
+  return true
+}
+
+function die(state: State, u: Unit): void {
+  u.mode = 'dead'
+  u.hp = 0
+  u.path = []
+  u.progress = 0
+  u.moveAcc = 0
+  u.target = null
+  u.status = UNIT_STATUS.dead
+  state.events.push({ t: 'died', unit: u.id })
+}
+
+function shoot(state: State, u: Unit, t: Unit): void {
+  const cover = coverFrom(state.grid, t.cell, u.cell)
+  const hit = rollHit(state.rng, hitChance(octile(u.cell, t.cell), cover))
+  state.events.push({ t: 'shot', from: u.id, to: t.id, hit })
+  // Промах — тоже огонь: юнит, мимо которого свистит, ищет укрытие.
+  t.underFireMs = UNDER_FIRE_MS
+  t.threat = u.id
+  if (hit) {
+    t.hp -= 1
+    if (t.hp <= 0) die(state, t)
+  }
+  u.shots += 1
+  u.mode = 'fire'
+  u.waitMs = FIRE_MS
+  u.status = UNIT_STATUS.fire
+}
+
+/**
+ * Ближайшая клетка в радиусе, укрытая от стрелка, с доступным путём.
+ * Порядок кандидатов — по расстоянию, затем по клетке: детерминизм.
+ */
+function findCover(state: State, u: Unit, from: Cell): Cell[] | null {
+  const grid = state.grid
+  const o = origin(u)
+  const spots: Cell[] = []
+  for (let dy = -COVER_RADIUS; dy <= COVER_RADIUS; dy++) {
+    for (let dx = -COVER_RADIUS; dx <= COVER_RADIUS; dx++) {
+      const c = { x: o.x + dx, y: o.y + dy }
+      if (grid.isBlocked(c.x, c.y) || occupied(state, c, u)) continue
+      if (!coverFrom(grid, c, from)) continue
+      spots.push(c)
+    }
+  }
+  spots.sort((a, b) => {
+    const da = octile(o, a)
+    const db = octile(o, b)
+    if (da !== db) return da - db
+    return a.y !== b.y ? a.y - b.y : a.x - b.x
+  })
+  for (const spot of spots) {
+    const path = grid.findPath(o, spot)
+    if (path !== null) return path
+  }
+  return null
+}
+
+/** Под огнём и не укрыт — бежать к укрытию. `true` — побежал. */
+function trySeekCover(state: State, u: Unit): boolean {
+  if (u.underFireMs <= 0 || u.seekCooldownMs > 0) return false
+  const threat = unitById(state, u.threat)
+  if (threat === null || !alive(threat)) return false
+  if (coverFrom(state.grid, origin(u), threat.cell)) return false
+  const path = findCover(state, u, threat.cell)
+  if (path === null) {
+    // Прятаться некуда — стоит и стреляет, и не перебирает клетки каждый тик.
+    u.seekCooldownMs = UNDER_FIRE_MS
+    return false
+  }
+  setPath(u, path)
+  u.mode = 'seek'
+  u.target = null
+  u.blockedMs = 0
+  u.status = UNIT_STATUS.seek
+  return true
+}
+
+/**
+ * Шаг по маршруту с учётом занятости: перед занятой клеткой юнит ждёт, а
+ * прождав BLOCKED_MS — бросает маршрут, чтобы двое не стояли друг перед
+ * другом вечно. `true` — маршрут кончился, так или иначе.
+ */
+function step(state: State, u: Unit): boolean {
+  const next = u.path[0]
+  if (next !== undefined && u.progress === 0 && occupied(state, next, u)) {
+    u.blockedMs += TICK_MS
+    if (u.blockedMs < BLOCKED_MS) {
+      u.status = UNIT_STATUS.yield
+      return false
+    }
+    u.path = []
+    u.blockedMs = 0
+    return true
+  }
+  u.blockedMs = 0
+  return advance(u, UNIT_MS_PER_CELL)
+}
+
+// ─── автомат ─────────────────────────────────────────────────────────────
+
+function stepIdle(state: State, u: Unit): void {
+  if (trySeekCover(state, u)) return
+  const t = acquire(state, u)
+  if (t !== null) {
+    beginAim(u, t)
+    return
+  }
+  if (u.side === 'enemy') {
+    // Под огнём и в укрытии — сидит, пока не стихнет: выскочить сразу по
+    // приходу значило бы бегать туда-сюда между укрытием и пулей.
+    if (u.underFireMs > 0) {
+      u.status = UNIT_STATUS.pinned
+      return
+    }
+    // Противник без цели наступает на ближайшего: иначе две стороны,
+    // спрятавшиеся за стенами, простоят до конца времён.
+    const enemy = nearestEnemy(state, u)
+    if (enemy !== null) beginMove(state, u, enemy.cell, UNIT_STATUS.search)
+    return
+  }
+  u.status = UNIT_STATUS.await
+}
+
+function stepMove(state: State, u: Unit): void {
+  // Идёт, видит врага в дальности огня — останавливается и стреляет.
+  // Начатый шаг доходит: возвращать в центр клетки — рывок назад.
+  const t = acquire(state, u)
+  if (t !== null && inFireRange(u, t)) {
+    u.path = stepInFlight(u)
+    beginAim(u, t)
+    return
+  }
+  if (step(state, u)) u.mode = 'idle'
+}
+
+function stepSeek(state: State, u: Unit): void {
+  if (step(state, u)) u.mode = 'idle'
+}
+
+function stepAim(state: State, u: Unit): void {
+  const t = unitById(state, u.target)
+  if (t === null || !alive(t) || !visible(state, u, t)) {
+    u.target = null
+    u.mode = 'idle'
+    u.path = stepInFlight(u)
+    return
+  }
+  if (trySeekCover(state, u)) return
+  u.facing = dirOf(u.cell, t.cell) ?? u.facing
+
+  if (!inFireRange(u, t)) {
+    u.waitMs = AIM_MS
+    // Свои не сближаются сами: куда идти — решение игрока, и строка
+    // состояния говорит ему, что решение требуется.
+    if (u.side === 'player') {
+      u.status = UNIT_STATUS.far
+      if (u.path.length > 0) step(state, u)
+      return
+    }
+    // Противник видит, но не достаёт — сближается, пока не достанет.
+    if (u.path.length === 0) {
+      const path = state.grid.findPath(origin(u), t.cell)
+      if (path === null) {
+        u.status = UNIT_STATUS.stuck
+        return
+      }
+      setPath(u, path)
+    }
+    u.status = UNIT_STATUS.close
+    step(state, u)
+    return
+  }
+
+  // Достаёт: остаток маршрута отменяется, начатый шаг доходит.
+  if (u.path.length > 0) {
+    u.path = stepInFlight(u)
+    if (u.path.length > 0) {
+      step(state, u)
+      return
+    }
+  }
+
+  const pinned = u.underFireMs > 0 && coverFrom(state.grid, u.cell, t.cell)
+  u.status = pinned ? UNIT_STATUS.pinned : u.shots === 0 ? UNIT_STATUS.aim : UNIT_STATUS.reload
+  u.waitMs -= TICK_MS
+  if (u.waitMs <= 0) shoot(state, u, t)
+}
+
+function stepFire(u: Unit): void {
+  u.waitMs -= TICK_MS
+  if (u.waitMs <= 0) {
+    u.mode = 'aim'
+    u.waitMs = RELOAD_MS - FIRE_MS
+    u.status = UNIT_STATUS.reload
+  }
+}
+
+export function tickUnits(state: State): void {
+  for (const u of state.units) {
+    if (!alive(u)) continue
+    if (u.underFireMs > 0) u.underFireMs -= TICK_MS
+    if (u.seekCooldownMs > 0) u.seekCooldownMs -= TICK_MS
+    switch (u.mode) {
+      case 'idle':
+        stepIdle(state, u)
+        break
+      case 'move':
+        stepMove(state, u)
+        break
+      case 'seek':
+        stepSeek(state, u)
+        break
+      case 'aim':
+        stepAim(state, u)
+        break
+      case 'fire':
+        stepFire(u)
+        break
+      case 'dead':
+        break
+    }
+  }
+}
+
+// ─── приказы ─────────────────────────────────────────────────────────────
+
+/** Приказ идти: ставит `move` и очищает цель. Дошедший снова ищет цели сам. */
+export function orderMove(state: State, ids: readonly string[], cell: Cell): void {
+  for (const id of ids) {
+    const u = unitById(state, id)
+    if (u === null || !alive(u)) continue
+    if (!beginMove(state, u, cell, UNIT_STATUS.move)) continue
+    if (u.path.length === 0) u.mode = 'idle'
+  }
+}
+
+export function orderHalt(state: State, ids: readonly string[]): void {
+  for (const id of ids) {
+    const u = unitById(state, id)
+    if (u === null || !alive(u)) continue
+    u.path = stepInFlight(u)
+    u.mode = 'idle'
+    u.target = null
+    u.status = UNIT_STATUS.halt
+  }
+}
+
+// ─── чтение ──────────────────────────────────────────────────────────────
+
+/** Текущая угроза: кто стрелял последним, пока это свежо, иначе цель. */
+export function threatOf(state: State, u: Unit): Unit | null {
+  if (u.underFireMs > 0) {
+    const threat = unitById(state, u.threat)
+    if (threat !== null && alive(threat)) return threat
+  }
+  const target = unitById(state, u.target)
+  return target !== null && alive(target) ? target : null
+}

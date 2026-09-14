@@ -6,21 +6,26 @@
  * Если хоть где-то в логику попадёт дельта, это свойство исчезнет.
  */
 
-import type { Cell, Snapshot, WorldView } from '../shared/protocol'
+import type { Cell, Mode, Snapshot, UnitView, WorldView } from '../shared/protocol'
 import { UNIT, tickAmount } from './fixed'
-import { ORTHO, dirOf, octile, stepCost } from './grid'
+import { dirOf, octile } from './grid'
 import { inZone, pileById, rankPiles, release } from './jobs'
+import { advance, origin, setPath, stepInFlight, stepMs as moverStepMs } from './mover'
 import { Rng } from './rng'
-import type { Cat, CatMode, Pile, State, Zone } from './state'
+import { openingOrders, spawnUnits } from './skirmish'
+import type { Cat, CatMode, Pile, State, Unit, UnitMode, Zone } from './state'
 import {
   DUMP_MS,
   NEARLY_DONE_UNITS,
   SUCK_MS_PER_UNIT,
   SURVEY_MS,
   TICK_MS,
+  UNIT_MS_PER_CELL,
   VACUUM_CAPACITY,
   WALK_MS_PER_CELL,
 } from './tuning'
+import { alive, orderHalt, orderMove, threatOf, tickUnits } from './units'
+import { coverFrom } from './los'
 import { CONTAINER, buildGrid, placePiles } from './world'
 
 /**
@@ -43,8 +48,9 @@ const STATUS = {
 const NEARLY_DONE = Math.round(NEARLY_DONE_UNITS * UNIT)
 
 export interface SaveState {
-  v: 1
+  v: 2
   seed: number
+  mode: Mode
   tick: number
   rng: number
   collected: number
@@ -68,27 +74,73 @@ export interface SaveState {
     waitMs: number
     status: string
   }>
+  units: Array<{
+    id: string
+    side: Unit['side']
+    x: number
+    y: number
+    path: Cell[]
+    progress: number
+    moveAcc: number
+    facing: Unit['facing']
+    mode: UnitMode
+    hp: number
+    target: string | null
+    waitMs: number
+    underFireMs: number
+    threat: string | null
+    seekCooldownMs: number
+    blockedMs: number
+    shots: number
+    status: string
+  }>
 }
 
 /** Сколько клеток маршрута видит рендер вперёд: на сглаживание хватает трёх. */
 const ROUTE_AHEAD = 4
 
-/** Длительность шага в модельных мс: диагональ дороже прямого. */
+/** Длительность шага кота в модельных мс. */
 function stepMs(from: Cell, to: Cell): number {
-  return (WALK_MS_PER_CELL * stepCost(from, to)) / ORTHO
+  return moverStepMs(from, to, WALK_MS_PER_CELL)
 }
 
 export class Sim {
   private state: State
 
-  constructor(seed: number) {
-    this.state = Sim.create(seed)
+  /**
+   * Оба среза живут в одном классе: тик, снапшот, сохранение и ГПСЧ у них
+   * общие, расходятся только наборы сущностей. Если через два шага окажется,
+   * что режимы ничего не делят, — разнести, но не заранее.
+   */
+  constructor(seed: number, mode: Mode = 'yard') {
+    this.state = Sim.create(seed, mode)
   }
 
-  private static create(seed: number): State {
+  private static create(seed: number, mode: Mode): State {
     const { grid, walls, props } = buildGrid()
     const rng = new Rng(seed)
-    const piles = placePiles(grid, rng, CONTAINER)
+    const state: State = {
+      seed,
+      mode,
+      tick: 0,
+      grid,
+      rng,
+      walls,
+      props,
+      container: { ...CONTAINER },
+      piles: [],
+      cats: [],
+      units: [],
+      zone: null,
+      collected: 0,
+      events: [],
+    }
+    if (mode === 'skirmish') {
+      state.units = spawnUnits()
+      openingOrders(state)
+      return state
+    }
+    state.piles = placePiles(grid, rng, CONTAINER)
     const cat: Cat = {
       id: 'rusty',
       cell: { x: CONTAINER.x - 2, y: CONTAINER.y },
@@ -107,23 +159,16 @@ export class Sim {
       waitMs: 0,
       status: STATUS.empty,
     }
-    return {
-      seed,
-      tick: 0,
-      grid,
-      rng,
-      walls,
-      props,
-      container: { ...CONTAINER },
-      piles,
-      cats: [cat],
-      zone: null,
-      collected: 0,
-    }
+    state.cats = [cat]
+    return state
   }
 
-  reset(seed: number): void {
-    this.state = Sim.create(seed)
+  reset(seed: number, mode: Mode = this.state.mode): void {
+    this.state = Sim.create(seed, mode)
+  }
+
+  get mode(): Mode {
+    return this.state.mode
   }
 
   // ─── команды ───────────────────────────────────────────────────────────
@@ -153,7 +198,7 @@ export class Sim {
           // клетки нельзя — на экране это рывок назад.
           release(this.state, cat)
           cat.mode = 'idle'
-          cat.path = this.stepInFlight(cat)
+          cat.path = stepInFlight(cat)
           cat.status = STATUS.walkZone
           break
         case 'haul':
@@ -182,12 +227,22 @@ export class Sim {
     }
   }
 
+  /** Перестрелка: приказ выделенным идти в клетку. Цель сбрасывается. */
+  move(units: readonly string[], cell: Cell): void {
+    orderMove(this.state, units, cell)
+  }
+
+  halt(units: readonly string[]): void {
+    orderHalt(this.state, units)
+  }
+
   // ─── тик ───────────────────────────────────────────────────────────────
 
   tick(): void {
     this.state.tick++
     // Порядок обхода — порядок массива, а он задан при создании и не меняется.
     for (const cat of this.state.cats) this.stepCat(cat)
+    tickUnits(this.state)
   }
 
   private stepCat(cat: Cat): void {
@@ -196,13 +251,13 @@ export class Sim {
         this.assign(cat)
         return
       case 'walk':
-        if (this.advance(cat)) this.arriveAtPile(cat)
+        if (advance(cat, WALK_MS_PER_CELL)) this.arriveAtPile(cat)
         return
       case 'work':
         this.work(cat)
         return
       case 'haul':
-        if (this.advance(cat)) {
+        if (advance(cat, WALK_MS_PER_CELL)) {
           cat.mode = 'dump'
           cat.waitMs = DUMP_MS
           cat.status = STATUS.dump
@@ -223,66 +278,6 @@ export class Sim {
   }
 
   /**
-   * Клетка, из которой строится новый маршрут.
-   *
-   * Кот, застигнутый приказом посреди шага, доходит до клетки, в которую уже
-   * ступил. Иначе маршрут считается от покинутой клетки, а кот на экране
-   * прыгает в её центр — рывок назад на каждый клик игрока.
-   */
-  private origin(cat: Cat): Cell {
-    const step = cat.path[0]
-    return cat.progress > 0 && step !== undefined ? step : cat.cell
-  }
-
-  /** Начатый шаг: то единственное из маршрута, что переживает новый приказ. */
-  private stepInFlight(cat: Cat): Cell[] {
-    const step = cat.path[0]
-    return cat.progress > 0 && step !== undefined ? [step] : []
-  }
-
-  /** Назначить маршрут, не отменяя начатый шаг. */
-  private setPath(cat: Cat, path: Cell[]): void {
-    const step = cat.path[0]
-    if (cat.progress > 0 && step !== undefined) {
-      // Прогресс и накопитель шага остаются: шаг продолжается, а не начинается.
-      cat.path = [step, ...path]
-      return
-    }
-    cat.path = path
-    cat.progress = 0
-    cat.moveAcc = 0
-  }
-
-  /** Продвижение по пути. `true` — путь пройден. */
-  private advance(cat: Cat): boolean {
-    if (cat.path.length === 0) return true
-
-    const next = cat.path[0]!
-    // Направление — туда, куда кот идёт, а не откуда пришёл. Если ставить его
-    // по факту прихода в клетку, кот целую клетку едет к цели боком и только
-    // потом доворачивается: на капсуле это незаметно, на модели — сразу видно.
-    cat.facing = dirOf(cat.cell, next) ?? cat.facing
-    const [amount, acc] = tickAmount(cat.moveAcc, stepMs(cat.cell, next))
-    cat.moveAcc = acc
-    cat.progress += amount
-
-    while (cat.progress >= UNIT && cat.path.length > 0) {
-      cat.progress -= UNIT
-      cat.prev = cat.cell
-      cat.cell = cat.path.shift()!
-      const ahead = cat.path[0]
-      if (ahead !== undefined) cat.facing = dirOf(cat.cell, ahead) ?? cat.facing
-    }
-
-    if (cat.path.length === 0) {
-      cat.progress = 0
-      cat.moveAcc = 0
-      return true
-    }
-    return false
-  }
-
-  /**
    * Путь к клетке, с которой кот работает с кучей.
    *
    * Он встаёт рядом, а не поверх: стоя на куче, он её собой и закрывает, и
@@ -292,7 +287,7 @@ export class Sim {
    */
   private approach(cat: Cat, pile: Pile): Cell[] | null {
     const grid = this.state.grid
-    const from = this.origin(cat)
+    const from = origin(cat)
     if (grid.isNeighbour(from, pile.cell)) return []
 
     const spots = grid.neighbours(pile.cell)
@@ -387,7 +382,7 @@ export class Sim {
   }
 
   private survey(cat: Cat): void {
-    if (!this.advance(cat)) {
+    if (!advance(cat, WALK_MS_PER_CELL)) {
       cat.status = STATUS.walkZone
       return
     }
@@ -401,36 +396,15 @@ export class Sim {
     }
   }
 
-  /**
-   * Путь к клетке или, если она занята, к ближайшей свободной рядом с ней.
-   *
-   * Контейнер — препятствие: кот разгружается, стоя перед ним, а не
-   * внутри него. Зона на стене или на контейнере — тоже намерение, и кот
-   * идёт к ней настолько, насколько можно, а не отказывается от неё.
-   */
-  private pathToNear(from: Cell, to: Cell): Cell[] | null {
-    const grid = this.state.grid
-    if (!grid.isBlocked(to.x, to.y)) return grid.findPath(from, to)
-    let best: Cell[] | null = null
-    for (let dy = -1; dy <= 1; dy++) {
-      for (let dx = -1; dx <= 1; dx++) {
-        if (dx === 0 && dy === 0) continue
-        const path = grid.findPath(from, { x: to.x + dx, y: to.y + dy })
-        if (path !== null && (best === null || path.length < best.length)) best = path
-      }
-    }
-    return best
-  }
-
   private beginHaul(cat: Cat, status: string): void {
     release(this.state, cat)
-    const path = this.pathToNear(this.origin(cat), this.state.container)
+    const path = this.state.grid.findPathNear(origin(cat), this.state.container)
     if (path === null) {
       cat.mode = 'idle'
       cat.status = STATUS.stuck
       return
     }
-    this.setPath(cat, path)
+    setPath(cat, path)
     const arrived = cat.path.length === 0
     cat.mode = arrived ? 'dump' : 'haul'
     cat.waitMs = DUMP_MS
@@ -443,7 +417,7 @@ export class Sim {
       cat.mode = 'idle'
       return
     }
-    const path = this.pathToNear(this.origin(cat), zone.cell)
+    const path = this.state.grid.findPathNear(origin(cat), zone.cell)
     if (path === null) {
       // До центра зоны не дойти — приоритет молча снимается, иначе кот
       // застрянет в намерении, которое нельзя исполнить.
@@ -451,7 +425,7 @@ export class Sim {
       cat.mode = 'idle'
       return
     }
-    this.setPath(cat, path)
+    setPath(cat, path)
     cat.mode = 'survey'
     cat.waitMs = SURVEY_MS
     cat.status = cat.path.length === 0 ? STATUS.survey : STATUS.walkZone
@@ -478,7 +452,7 @@ export class Sim {
         return
       }
       cat.status = STATUS.empty
-      this.setPath(cat, [])
+      setPath(cat, [])
       return
     }
 
@@ -487,7 +461,7 @@ export class Sim {
       if (path === null) continue
       pile.reservedBy = cat.id
       cat.target = pile.id
-      this.setPath(cat, path)
+      setPath(cat, path)
       cat.suckAcc = 0
       cat.unitAcc = 0
       if (cat.path.length === 0) {
@@ -508,6 +482,7 @@ export class Sim {
     const s = this.state
     return {
       seed: s.seed,
+      mode: s.mode,
       width: s.grid.width,
       height: s.grid.height,
       walls: s.walls.map((c) => ({ ...c })),
@@ -526,10 +501,49 @@ export class Sim {
     return null
   }
 
+  private unitView(u: Unit): UnitView {
+    const s = this.state
+    const threat = threatOf(s, u)
+    let action: UnitView['action']
+    switch (u.mode) {
+      case 'seek':
+        action = 'move'
+        break
+      case 'aim':
+        // Сближение — тоже прицеливание, но идти надо ногами, а не позой.
+        action = u.path.length > 0 ? 'move' : 'aim'
+        break
+      default:
+        action = u.mode
+    }
+    return {
+      id: u.id,
+      side: u.side,
+      cell: { ...u.cell },
+      prev: u.prev === null ? null : { ...u.prev },
+      next: u.path.length > 0 ? { ...u.path[0]! } : null,
+      route: u.path.slice(0, ROUTE_AHEAD).map((p) => ({ ...p })),
+      progress: u.progress / UNIT,
+      stepMs: u.path.length > 0 ? moverStepMs(u.cell, u.path[0]!, UNIT_MS_PER_CELL) : 0,
+      facing: u.facing,
+      action,
+      hp: u.hp,
+      cover: threat !== null && alive(u) && coverFrom(s.grid, u.cell, threat.cell),
+      target: u.target,
+      status: u.status,
+    }
+  }
+
   snapshot(): Snapshot {
     const s = this.state
     let remaining = 0
     for (const p of s.piles) remaining += p.volume
+
+    // События забираются: это буфер вывода, а не состояние. Хеш их не
+    // видит, и на ход симуляции они не влияют — снапшот по-прежнему ничего
+    // не меняет в том, что проверяет детерминизм.
+    const events = s.events
+    s.events = []
 
     return {
       tick: s.tick,
@@ -563,12 +577,15 @@ export class Sim {
         })),
       zone: s.zone === null ? null : { cell: { ...s.zone.cell }, radius: s.zone.radius },
       totals: { remaining: remaining / UNIT, collected: s.collected / UNIT },
+      units: s.units.map((u) => this.unitView(u)),
+      events,
     }
   }
 
   // ─── проверки и сохранение ─────────────────────────────────────────────
 
   private static readonly MODES: readonly CatMode[] = ['idle', 'walk', 'work', 'haul', 'dump', 'survey']
+  private static readonly UNIT_MODES: readonly UnitMode[] = ['idle', 'move', 'aim', 'fire', 'seek', 'dead']
 
   /** FNV-1a по всему, что может разойтись. Основа теста детерминизма. */
   hash(): number {
@@ -615,6 +632,28 @@ export class Sim {
       }
       str(c.status)
     }
+    for (const u of s.units) {
+      str(u.id)
+      num(u.cell.x)
+      num(u.cell.y)
+      num(u.progress)
+      num(u.moveAcc)
+      num(Sim.UNIT_MODES.indexOf(u.mode))
+      num(u.hp)
+      str(u.target ?? '-')
+      num(u.waitMs)
+      num(u.underFireMs)
+      str(u.threat ?? '-')
+      num(u.seekCooldownMs)
+      num(u.blockedMs)
+      num(u.shots)
+      num(u.path.length)
+      for (const step of u.path) {
+        num(step.x)
+        num(step.y)
+      }
+      str(u.status)
+    }
     return h
   }
 
@@ -625,8 +664,9 @@ export class Sim {
   serialize(): SaveState {
     const s = this.state
     return {
-      v: 1,
+      v: 2,
       seed: s.seed,
+      mode: s.mode,
       tick: s.tick,
       rng: s.rng.state,
       collected: s.collected,
@@ -657,11 +697,31 @@ export class Sim {
         waitMs: c.waitMs,
         status: c.status,
       })),
+      units: s.units.map((u) => ({
+        id: u.id,
+        side: u.side,
+        x: u.cell.x,
+        y: u.cell.y,
+        path: u.path.map((p) => ({ ...p })),
+        progress: u.progress,
+        moveAcc: u.moveAcc,
+        facing: u.facing,
+        mode: u.mode,
+        hp: u.hp,
+        target: u.target,
+        waitMs: u.waitMs,
+        underFireMs: u.underFireMs,
+        threat: u.threat,
+        seekCooldownMs: u.seekCooldownMs,
+        blockedMs: u.blockedMs,
+        shots: u.shots,
+        status: u.status,
+      })),
     }
   }
 
   static load(save: SaveState): Sim {
-    const sim = new Sim(save.seed)
+    const sim = new Sim(save.seed, save.mode)
     const s = sim.state
     s.tick = save.tick
     s.rng.state = save.rng
@@ -692,6 +752,27 @@ export class Sim {
       waitMs: c.waitMs,
       status: c.status,
     }))
+    s.units = save.units.map((u) => ({
+      id: u.id,
+      side: u.side,
+      cell: { x: u.x, y: u.y },
+      prev: null,
+      path: u.path.map((p) => ({ ...p })),
+      progress: u.progress,
+      moveAcc: u.moveAcc,
+      facing: u.facing,
+      mode: u.mode,
+      hp: u.hp,
+      target: u.target,
+      waitMs: u.waitMs,
+      underFireMs: u.underFireMs,
+      threat: u.threat,
+      seekCooldownMs: u.seekCooldownMs,
+      blockedMs: u.blockedMs,
+      shots: u.shots,
+      status: u.status,
+    }))
+    s.events = []
     return sim
   }
 }
