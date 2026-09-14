@@ -1,28 +1,27 @@
 """
-Кит юнитов из Mixamo: один скелет, пять клипов — и `unit-kit.glb`.
+Кит юнитов: кот, риггнутый в Mixamo, пять его клипов — и `unit-kit.glb`.
 
     blender --background --python assets/build-unit-kit.py
 
-Вход — папка `assets/mixamo/unit/`: персонаж в T-позе со скином и клипы,
-скачанные для того же персонажа (см. FILES). Клипы можно качать без скина,
-«In Place» для бега — желательно, но не обязательно: горизонтальный ход
-бёдер здесь всё равно вырезается, движение по земле даёт симуляция.
+Вход — папка `assets/mixamo/cat/`: кот со скелетом и скином из авториггера
+Mixamo (`assets/export-for-mixamo.py` готовит для него меш) и клипы,
+скачанные *для этого кота* (см. FILES). Клипы — без скина, «In Place» для
+бега желательно, но не обязательно: горизонтальный ход бёдер здесь всё
+равно вырезается, движение по земле даёт симуляция.
+
+Переноса анимаций нет: скелет построен по мешу кота, и клипы Mixamo
+ретаргетит на него сам. Раньше здесь был Y Bot и перенос его клипов на
+самодельный скелет кота через мировые дельты — руки приходили не туда.
 
 Выход: `assets/unit.blend` (эталон) и `public/models/unit-kit.glb`.
 
 Контракт с кодом (проверяется `tests/unit-kit.test.ts`):
-  узел меша `unit_body`, кости `mixamorig:*`, клипы idle / run / aim /
-  fire / die, у `run` в extras `foot_speed` — скорость опорной стопы, по
-  которой рендер подбирает timeScale, чтобы ноги не скользили.
+  узел меша `unit_body`, кости `mixamorig:*` и `tail_*`, клипы idle / run /
+  aim / fire / die, у `run` в extras `foot_speed` — скорость опорной стопы,
+  по которой рендер подбирает timeScale, чтобы ноги не скользили.
 
-Текстур нет: материал один и плоский, цвет стороны кладёт рендер.
-
-Вторая половина кита — те же четыре боевых клипа, перенесённые на скелет
-кота из `assets/rusty.blend`: `cat_run / cat_aim / cat_fire / cat_die`. Свои
-в перестрелке — Ржавый, и стрелять он должен позами Mixamo, а не пылесосить.
-Скелет кота Mixamo-совместим по именам, но не по rest-позе (руки в A-позе,
-нет Spine2 и пальцев), поэтому перенос — через мировые дельты поворотов с
-выравниванием направлений костей, а не копированием локальных кватернионов.
+Карта кота остаётся: обе стороны — коты, сторону рендер кладёт оттенком.
+Хвост авториггер не знает: его кости и веса — из эталона `rusty.blend`.
 """
 
 import glob
@@ -33,23 +32,23 @@ import bpy
 from mathutils import Matrix, Vector
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SRC = os.path.join(ROOT, "assets", "mixamo", "unit")
+# Два типа тела — два скелета, два набора клипов. Свои — кот, противник —
+# Y Bot; у каждого свои клипы, скачанные для него: перенос не нужен.
+CHARACTERS = [
+    # (папка, префикс клипов, имя скелета, имя меша, рост, плоский цвет или None — своя карта)
+    ("cat", "cat_", "cat_rig", "cat_body", 1.20, None),
+    ("unit", "", "unit_rig", "unit_body", 1.35, (0.6, 0.6, 0.6, 1.0)),
+]
 BLEND = os.path.join(ROOT, "assets", "unit.blend")
 GLB = os.path.join(ROOT, "public", "models", "unit-kit.glb")
 CAT_BLEND = os.path.join(ROOT, "assets", "rusty.blend")
 CAT_RIG = "rusty_rig"
-# Клипы, которые переносятся на кота. Idle у кота свой, из его кита.
-CAT_CLIPS = ("run", "aim", "fire", "die")
 
 RIG = "mixamorig:"
 FPS = 30
 
-# Рост юнита от подошв до макушки, м. Кот — 1.20; юнит чуть выше, но
-# клетка всё ещё метр, и в проём он должен помещаться.
-HEIGHT = 1.35
-
-# Бюджет треугольников на всего юнита: Mixamo-персонажи приходят с 10–25k,
-# на нашем масштабе это неразличимо от двух тысяч.
+# Бюджет треугольников Y Bot: приходит с 55k, на нашем масштабе это
+# неразличимо от двух тысяч. Кот идёт родной сеткой (~5,5k).
 TRIS = 2200
 
 # Имя клипа → подстроки имени файла (без учёта регистра): все из `need`,
@@ -69,10 +68,10 @@ def log(msg):
     print(f"  {msg}")
 
 
-def fbx_files():
-    files = sorted(glob.glob(os.path.join(SRC, "*.fbx")) + glob.glob(os.path.join(SRC, "*.FBX")))
+def fbx_files(src):
+    files = sorted(glob.glob(os.path.join(src, "*.fbx")) + glob.glob(os.path.join(src, "*.FBX")))
     if not files:
-        sys.exit(f"в {SRC} нет FBX: положите персонажа и клипы из Mixamo")
+        sys.exit(f"в {src} нет FBX: положите персонажа и клипы из Mixamo")
     return files
 
 
@@ -103,6 +102,37 @@ def import_fbx(path):
     return rigs[0], meshes
 
 
+def to_tpose(rig, meshes):
+    """Rest-поза персонажа — T-поза, как у клипов.
+
+    Mixamo отдаёт персонажа с bind-позой, в которой он был загружен (у кота —
+    A-поза), а T-позу кладёт однокадровым клипом. Клипы же записаны от
+    T-позы: положить их на A-позу — руки уходят к лицу (проверено: плечо
+    расходится на 58°). Поэтому однокадровый клип запекается в rest-позу и в
+    меш, и дальше всё считается от T.
+    """
+    ad = rig.animation_data
+    act = ad.action if ad is not None else None
+    if act is None or (act.frame_range[1] - act.frame_range[0]) > 2:
+        log("персонаж без однокадровой T-позы — rest-поза как есть")
+        return
+    bpy.context.scene.frame_set(int(act.frame_range[0]))
+    bpy.context.view_layer.update()
+    for m in meshes:
+        for mod in [x for x in m.modifiers if x.type == "ARMATURE"]:
+            bpy.context.view_layer.objects.active = m
+            bpy.ops.object.modifier_apply(modifier=mod.name)
+        mod = m.modifiers.new("armature", "ARMATURE")
+        mod.object = rig
+    bpy.context.view_layer.objects.active = rig
+    bpy.ops.object.mode_set(mode="POSE")
+    bpy.ops.pose.armature_apply(selected=False)
+    bpy.ops.object.mode_set(mode="OBJECT")
+    ad.action = None
+    bpy.data.actions.remove(act)
+    log("rest-поза → T-поза из однокадрового клипа")
+
+
 def normalise_names(rig):
     """Mixamo иногда нумерует префикс (`mixamorig1:`); контракт — без номера."""
     for b in rig.data.bones:
@@ -129,20 +159,21 @@ def height_of(meshes):
     return max(zs) - min(zs), min(zs)
 
 
-def fit(rig, meshes):
-    """Рост — HEIGHT, подошвы — на нуле. Масштаб остаётся на объекте
+def fit(rig, meshes, height):
+    """Рост — height, подошвы — на нуле. Масштаб остаётся на объекте
     арматуры: применять его нельзя — смещения бёдер в клипах живут в
     локальных единицах костей и после применения прыгнули бы."""
     h, z0 = height_of(meshes)
-    k = HEIGHT / h
+    k = height / h
     rig.scale = rig.scale * k
     rig.location.z -= z0 * k
     bpy.context.view_layer.update()
-    log(f"рост {h:.2f} → {HEIGHT:.2f}, масштаб арматуры {rig.scale.x:.4f}")
+    log(f"рост {h:.2f} → {height:.2f}, масштаб арматуры {rig.scale.x:.4f}")
 
 
-def one_mesh(meshes, rig):
-    """Все меши персонажа — в один `unit_body` с плоским материалом."""
+def one_mesh(meshes, rig, name, flat):
+    """Все меши персонажа — в один меш `name`. `flat` — плоский цвет
+    (Y Bot: сторону кладёт рендер); None — материал и карта как пришли (кот)."""
     bpy.ops.object.select_all(action="DESELECT")
     for m in meshes:
         m.select_set(True)
@@ -150,19 +181,31 @@ def one_mesh(meshes, rig):
     if len(meshes) > 1:
         bpy.ops.object.join()
     body = bpy.context.view_layer.objects.active
-    body.name = "unit_body"
-    body.data.name = "unit_body"
-    body.data.materials.clear()
-    mat = bpy.data.materials.new("unit")
-    mat.use_nodes = True
-    bsdf = mat.node_tree.nodes.get("Principled BSDF")
-    if bsdf is not None:
-        bsdf.inputs["Base Color"].default_value = (0.6, 0.6, 0.6, 1.0)
-        bsdf.inputs["Roughness"].default_value = 0.9
-    body.data.materials.append(mat)
-    # Атрибуты, которые Mixamo тащит с собой, но ките не нужны.
-    for uv in list(body.data.uv_layers):
-        body.data.uv_layers.remove(uv)
+    body.name = name
+    body.data.name = name
+    if flat is not None:
+        body.data.materials.clear()
+        mat = bpy.data.materials.new(name + "_flat")
+        mat.use_nodes = True
+        bsdf = mat.node_tree.nodes.get("Principled BSDF")
+        if bsdf is not None:
+            bsdf.inputs["Base Color"].default_value = flat
+            bsdf.inputs["Roughness"].default_value = 0.9
+        body.data.materials.append(mat)
+        for uv in list(body.data.uv_layers):
+            body.data.uv_layers.remove(uv)
+    else:
+        for mat in body.data.materials:
+            if mat is None:
+                continue
+            mat.name = name + "_skin"
+            bsdf = mat.node_tree.nodes.get("Principled BSDF") if mat.use_nodes else None
+            if bsdf is not None:
+                bsdf.inputs["Roughness"].default_value = 0.9
+                bsdf.inputs["Metallic"].default_value = 0.0
+        for img in bpy.data.images:
+            if img.users > 0 and not img.packed_file and img.filepath:
+                img.pack()
     for ca in list(body.data.color_attributes):
         body.data.color_attributes.remove(ca)
     return body
@@ -172,13 +215,13 @@ def tris_of(obj):
     return sum(len(p.vertices) - 2 for p in obj.data.polygons)
 
 
-def decimate(body):
+def decimate(body, tris):
     before = tris_of(body)
-    if before <= TRIS:
+    if before <= tris:
         log(f"{before} тр., децимация не нужна")
         return
     mod = body.modifiers.new("decimate", "DECIMATE")
-    mod.ratio = TRIS / before
+    mod.ratio = tris / before
     mod.use_collapse_triangulate = True
     bpy.context.view_layer.objects.active = body
     bpy.ops.object.modifier_apply(modifier=mod.name)
@@ -222,19 +265,21 @@ def foot_speed(rig, act, first, last):
     return sum(speeds) / len(speeds) if speeds else 0.0
 
 
-def adopt(rig, path, name, loop):
-    """Клип из файла — на главный скелет. Кости те же, поэтому экшен
-    переносится как есть; временная арматура удаляется."""
+def adopt(rig, path, name, loop, prefix):
+    """Клип из файла — на скелет `rig`. Кости те же, поэтому экшен
+    переносится как есть; временная арматура удаляется. Экшен зовётся
+    `prefix + name`: у двух скелетов клипы лежат в одном файле."""
     tmp_rig, tmp_meshes = import_fbx(path)
     normalise_names(tmp_rig)
     act = tmp_rig.animation_data.action if tmp_rig.animation_data else None
     if act is None:
         sys.exit(f"{os.path.basename(path)}: в файле нет анимации")
-    act.name = name
+    act.name = prefix + name
     act.use_fake_user = True
     delete(tmp_meshes + [tmp_rig])
     first, last = act.frame_range
-    if name == "run":
+    name = act.name
+    if name.endswith("run"):
         strip_root_motion(act)
         act["foot_speed"] = foot_speed(rig, act, first, last)
         log(f"{name}: ноги {act['foot_speed']:.2f} ед/с")
@@ -249,164 +294,103 @@ def adopt(rig, path, name, loop):
 
 
 # --------------------------------------------------------------------------
-# Перенос на кота
+# Хвост
 # --------------------------------------------------------------------------
 
-def append_cat_rig():
-    """Скелет кота из эталона — без мешей и без его клипов: они в его ките."""
+def graft_tail(rig, body, keep_actions):
+    """Хвост из эталона — на скелет Mixamo.
+
+    Авториггер о хвосте не знает и раздаёт его вершины ближайшей ноге — хвост
+    махал бы вместе с бедром. Порядок вершин Mixamo сохраняет (проверено:
+    расхождение 0), поэтому веса хвоста переносятся из `rusty.blend` по
+    индексу, а кости `tail_*` встают под бёдра в тех же мировых точках.
+    """
     if not os.path.exists(CAT_BLEND):
         sys.exit(f"нет {CAT_BLEND}: сначала npm run assets (кит кота)")
     before = set(bpy.data.objects)
-    bpy.ops.wm.append(
-        filepath=os.path.join(CAT_BLEND, "Object", CAT_RIG),
-        directory=os.path.join(CAT_BLEND, "Object"),
-        filename=CAT_RIG,
-    )
-    rigs = [o for o in bpy.data.objects if o not in before and o.type == "ARMATURE"]
-    if len(rigs) != 1:
-        sys.exit(f"в {CAT_BLEND} не нашлась арматура {CAT_RIG}")
-    rig = rigs[0]
-    rig.name = "cat_rig"
-    # Клипы кота приехали вместе с NLA — снять, иначе экспорт положит их в
-    # кит юнитов под теми же именами, что у Y Bot.
-    old = set()
-    if rig.animation_data is not None:
-        for t in rig.animation_data.nla_tracks:
-            for st in t.strips:
-                if st.action is not None:
-                    old.add(st.action)
-        rig.animation_data_clear()
-    for act in old:
-        if act.users == 0 or act.use_fake_user:
-            bpy.data.actions.remove(act)
-    rig.location = (0.0, 0.0, 0.0)
-    bpy.context.view_layer.update()
-    return rig
+    with bpy.data.libraries.load(CAT_BLEND, link=False) as (src, dst):
+        dst.objects = [CAT_RIG, "body_stocky"]
+    added = [o for o in bpy.data.objects if o not in before]
+    old_rig = next(o for o in added if o.type == "ARMATURE")
+    old_body = next(o for o in added if o.type == "MESH")
+    if len(old_body.data.vertices) > len(body.data.vertices):
+        sys.exit("корпус эталона больше меша Mixamo: порядок вершин не тот")
 
+    tails = [b for b in old_rig.data.bones if b.name.startswith("tail_")]
+    tails.sort(key=lambda b: b.name)
+    world_inv = rig.matrix_world.inverted()
+    bpy.context.view_layer.objects.active = rig
+    bpy.ops.object.mode_set(mode="EDIT")
+    eb = rig.data.edit_bones
+    for b in tails:
+        nb = eb.new(b.name)
+        nb.head = world_inv @ (old_rig.matrix_world @ b.head_local)
+        nb.tail = world_inv @ (old_rig.matrix_world @ b.tail_local)
+        nb.parent = eb[b.parent.name if b.parent.name in eb else RIG + "Hips"]
+    bpy.ops.object.mode_set(mode="OBJECT")
 
-def rot3(m):
-    return m.to_3x3().normalized()
-
-
-def retarget(src, src_act, dst, name, first, last, scale):
-    """Клип `src_act` со скелета `src` — на скелет `dst`, экшеном `name`.
-
-    Для каждой кости-тёзки: мировая дельта поворота источника от его
-    rest-позы применяется к rest-позе приёмника, предварительно повёрнутой
-    так, чтобы направление кости совпало с источником (A-поза → T-поза).
-    Пропущенные в приёмнике кости (Spine2, пальцы) не теряются: дельта
-    мировая, потомок несёт её в себе. Бёдра переносят и смещение — в
-    масштабе роста.
-    """
-    ad = src.animation_data
-    ad.action = src_act
-    if hasattr(ad, "action_slot") and ad.action_slot is None:
-        ad.action_slot = src_act.slots[0]
-
-    act = bpy.data.actions.new(name)
-    act.use_fake_user = True
-    dad = dst.animation_data or dst.animation_data_create()
-    dad.action = act
-    if hasattr(dad, "action_slot") and dad.action_slot is None:
-        dad.action_slot = act.slots.new(id_type="OBJECT", name=dst.name)
-
-    src_world = src.matrix_world
-    dst_world = dst.matrix_world
-    dst_world_inv = dst_world.inverted()
-    pairs = []
-    # Порядок — родители раньше детей: поза потомка считается от позы родителя.
-    # Голова не переносится — как и в клипах самого кота: у него короткая
-    # шея и огромная голова, и запрокинутая по-человечески голова читается
-    # как оторванная. Голова идёт за шеей; взгляд — дело рантайма.
-    for bone in dst.data.bones:
-        if bone.name not in src.data.bones or bone.name == RIG + "Head":
+    names = [b.name for b in tails]
+    groups = {n: body.vertex_groups.new(name=n) for n in names}
+    moved = 0
+    for v in old_body.data.vertices:
+        weights = []
+        for g in v.groups:
+            n = old_body.vertex_groups[g.group].name
+            if n in groups and g.weight > 0.0:
+                weights.append((n, g.weight))
+        if not weights:
             continue
-        depth = 0
-        p = bone.parent
-        while p is not None:
-            depth += 1
-            p = p.parent
-        pairs.append((depth, bone.name))
-    pairs.sort()
-    names = [n for _, n in pairs]
-
-    corr = {}
-    for n in names:
-        sb = src.data.bones[n]
-        db = dst.data.bones[n]
-        d_src = (rot3(src_world) @ (sb.tail_local - sb.head_local)).normalized()
-        d_dst = (rot3(dst_world) @ (db.tail_local - db.head_local)).normalized()
-        corr[n] = d_dst.rotation_difference(d_src).to_matrix()
-
-    hips = RIG + "Hips"
-    src_hips_rest = (src_world @ src.data.bones[hips].matrix_local).to_translation()
-    dst_hips_rest = (dst_world @ dst.data.bones[hips].matrix_local).to_translation()
-    # По вертикали — в масштабе высоты бёдер, а не роста: лежащее тело —
-    # это бёдра у самого пола, и после масштаба по росту у коротконогого
-    # кота они уходили под пол. По горизонтали — по росту, как и шаг.
-    scale_v = dst_hips_rest.z / src_hips_rest.z
-    scale_xy = Vector((scale, scale, scale_v))
-
-    for f in range(int(first), int(last) + 1):
-        bpy.context.scene.frame_set(f)
-        pose = {}
-        for n in names:
-            sb = src.data.bones[n]
-            spb = src.pose.bones[n]
-            db = dst.data.bones[n]
-            dpb = dst.pose.bones[n]
-
-            delta = rot3(src_world @ spb.matrix) @ rot3(src_world @ sb.matrix_local).inverted()
-            target_rot = delta @ corr[n] @ rot3(dst_world @ db.matrix_local)
-            target_arm = (rot3(dst_world_inv) @ target_rot).to_4x4()
-
-            if db.parent is None or db.parent.name not in pose:
-                base = db.matrix_local.copy()
-            else:
-                base = pose[db.parent.name] @ (db.parent.matrix_local.inverted() @ db.matrix_local)
-            if n == hips:
-                moved = (src_world @ spb.matrix).to_translation() - src_hips_rest
-                moved = Vector((moved.x * scale_xy.x, moved.y * scale_xy.y, moved.z * scale_xy.z))
-                target_arm.translation = dst_world_inv @ (dst_hips_rest + moved)
-            else:
-                target_arm.translation = base.to_translation()
-            pose[n] = target_arm
-
-            basis = base.inverted() @ target_arm
-            dpb.rotation_mode = "QUATERNION"
-            dpb.rotation_quaternion = basis.to_quaternion()
-            dpb.keyframe_insert("rotation_quaternion", frame=f)
-            if n == hips:
-                dpb.location = basis.to_translation()
-                dpb.keyframe_insert("location", frame=f)
-
-    ad.action = None
-    dad.action = None
-    for pb in dst.pose.bones:
-        pb.rotation_quaternion = (1.0, 0.0, 0.0, 0.0)
-        pb.location = (0.0, 0.0, 0.0)
-    return act
+        total = sum(w for _, w in weights)
+        nv = body.data.vertices[v.index]
+        for g in list(nv.groups):
+            body.vertex_groups[g.group].remove([v.index])
+        for n, w in weights:
+            groups[n].add([v.index], w / total, "REPLACE")
+        moved += 1
+    delete([old_body, old_rig])
+    # Вместе с эталоном приехали его клипы (idle, walk, haul…): они в его
+    # ките, здесь им не место — иначе экспорт положит их в кит юнитов.
+    for act in list(bpy.data.actions):
+        if act not in keep_actions:
+            bpy.data.actions.remove(act)
+    log(f"хвост: {len(tails)} кости, {moved} вершин")
 
 
-def cat_clips(unit_rig, cat, clip_actions, unit_height):
-    """Четыре боевых клипа — на кота, полосами NLA `cat_*`."""
-    cat_h = max((cat.matrix_world @ b.tail_local).z for b in cat.data.bones)
-    scale = cat_h / unit_height
-    dad = cat.animation_data or cat.animation_data_create()
-    for name in CAT_CLIPS:
-        src_act = clip_actions[name]
-        first, last = src_act.frame_range
-        act = retarget(unit_rig, src_act, cat, f"cat_{name}", first, last, scale)
-        if name == "run":
-            act["foot_speed"] = foot_speed(cat, act, first, last)
-            log(f"cat_run: ноги {act['foot_speed']:.2f} ед/с")
-        track = dad.nla_tracks.new()
-        track.name = f"cat_{name}"
-        strip = track.strips.new(f"cat_{name}", int(first), act)
-        strip.action_frame_start, strip.action_frame_end = first, last
-        track.mute = True
-        log(f"клип cat_{name}: перенесён")
-    dad.action = None
+def build_character(folder, prefix, rig_name, body_name, height, flat):
+    src = os.path.join(ROOT, "assets", "mixamo", folder)
+    files = fbx_files(src)
+    clip_files = {}
+    for name, need, avoid, loop in FILES:
+        f = pick(files, need, avoid)
+        if f is None and name == "die":
+            f = pick(files, *DIE_ALT)
+        if f is None and name == "idle":
+            # Без Rifle Idle кит собирается, но стоять юнит будет в прицеле.
+            f = pick(files, ("aim",))
+            log(f"ВНИМАНИЕ: в {folder} нет Rifle Idle — покой временно из прицела; скачайте Rifle Idle")
+        if f is None:
+            sys.exit(f"{folder}: нет файла для клипа {name} (в имени: {' и '.join(need)})")
+        clip_files[name] = (f, loop)
+    used = {f for f, _ in clip_files.values()}
+    character = pick(files, ("for-mixamo",)) or pick(files, ("character",)) or next((f for f in files if f not in used), None)
+    if character is None:
+        sys.exit(f"{folder}: нет файла персонажа со скином, не совпадающего по имени с клипами")
+    log(f"персонаж {folder}: {os.path.basename(character)}")
+
+    rig, meshes = import_fbx(character)
+    normalise_names(rig)
+    rig.name = rig_name
+    if not meshes:
+        sys.exit("у персонажа нет меша: качайте его «with skin»")
+    to_tpose(rig, meshes)
+    fit(rig, meshes, height)
+    body = one_mesh(meshes, rig, body_name, flat)
+    decimate(body, TRIS if flat is not None else 10_000)
+    if flat is None:
+        graft_tail(rig, body, set(bpy.data.actions))
+    for name, (path, loop) in clip_files.items():
+        adopt(rig, path, name, loop, prefix)
+    log(f"{body_name}: {tris_of(body)} тр.")
 
 
 def main():
@@ -414,39 +398,9 @@ def main():
     bpy.context.scene.unit_settings.system = "METRIC"
     bpy.context.scene.render.fps = FPS
 
-    files = fbx_files()
-    clip_files = {}
-    for name, need, avoid, loop in FILES:
-        f = pick(files, need, avoid)
-        if f is None and name == "die":
-            f = pick(files, *DIE_ALT)
-        if f is None:
-            sys.exit(f"нет файла для клипа {name} (в имени: {' и '.join(need)})")
-        clip_files[name] = (f, loop)
-    used = {f for f, _ in clip_files.values()}
-    character = pick(files, ("character",)) or next((f for f in files if f not in used), None)
-    if character is None:
-        sys.exit("нет файла персонажа: T-поза со скином, не совпадающая по имени с клипами")
-    log(f"персонаж: {os.path.basename(character)}")
+    for spec in CHARACTERS:
+        build_character(*spec)
 
-    rig, meshes = import_fbx(character)
-    normalise_names(rig)
-    rig.name = "unit_rig"
-    if rig.animation_data is not None:
-        rig.animation_data.action = None
-    if not meshes:
-        sys.exit("у персонажа нет меша: качайте его «with skin»")
-    fit(rig, meshes)
-    body = one_mesh(meshes, rig)
-    decimate(body)
-
-    actions = {}
-    for name, (path, loop) in clip_files.items():
-        actions[name] = adopt(rig, path, name, loop)
-
-    log(f"юнит: {tris_of(body)} тр.")
-    cat = append_cat_rig()
-    cat_clips(rig, cat, actions, HEIGHT)
     os.makedirs(os.path.dirname(GLB), exist_ok=True)
     bpy.ops.wm.save_as_mainfile(filepath=BLEND)
     bpy.ops.export_scene.gltf(
@@ -457,7 +411,8 @@ def main():
         export_skins=True,
         export_vertex_color="NONE",
         export_materials="EXPORT",
-        export_image_format="NONE",
+        export_image_format="JPEG",
+        export_jpeg_quality=80,
         export_animations=True,
         export_extras=True,
         export_animation_mode="ACTIONS",

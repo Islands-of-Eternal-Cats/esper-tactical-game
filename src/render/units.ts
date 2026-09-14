@@ -31,7 +31,7 @@ const HEADING: Record<Dir, [number, number]> = {
 const TURN_RATE = 18
 /**
  * Куда ложится тело в клипе смерти, в системе фигуры (x вправо, z вперёд):
- * голова и дальняя нога. Измерено по `cat_die`; у Y Bot — тот же клип.
+ * голова и дальняя нога. Измерено по клипу `die`.
  * По этим точкам при смерти выбирается поворот, чтобы труп не лёг в стену.
  */
 const FALL_HEAD: [number, number] = [-0.5, 0.45]
@@ -253,11 +253,9 @@ const CLIP_OF: Record<UnitView['action'], string> = {
 }
 
 /**
- * Свои — Ржавый: тело и голова из кита кота, без пылесоса; покой — его
- * собственный, бой — клипы Mixamo, перенесённые на его скелет (`cat_*` в
- * ките юнитов). Противник — Y Bot целиком из кита юнитов.
+ * Свои — кот, противник — Y Bot; оба из кита юнитов, у каждого свой скелет и
+ * свои клипы, скачанные для него: переноса нет. Клипы кота — `cat_*`.
  */
-const CAT_PARTS = ['head_rusty', 'body_stocky'] as const
 const CAT_HEIGHT = 1.2
 
 /** Однократные клипы: выстрел отыгрывается и держит последний кадр, смерть — тоже. */
@@ -275,7 +273,7 @@ const FADE: Record<UnitView['action'], number> = {
   dead: 0.1,
 }
 
-/** Рост модели — из скрипта сборки (HEIGHT). Полоска и знак — над ним. */
+/** Рост Y Bot — из скрипта сборки (CHARACTERS). Полоска и знак — над ним. */
 const MODEL_HEIGHT = 1.35
 
 function footSpeedOf(clip: THREE.AnimationClip): number | null {
@@ -313,11 +311,12 @@ class ModelFigure implements Figure {
   private readonly hold: number
   private readonly v1 = new THREE.Vector3()
   private readonly v2 = new THREE.Vector3()
+  private readonly v3 = new THREE.Vector3()
 
   /**
    * `clipsOf(action)` — откуда брать клип: у Y Bot всё из одного кита, у
-   * кота покой из своего, бой — из кита юнитов. `color` — плоский цвет
-   * стороны; null — оставить материалы кита (кот раскрашен своей картой).
+   * кота свои `cat_*`. `color` — плоский цвет стороны; null — оставить
+   * материалы кита (кот раскрашен своей картой).
    * `gun` — модель из кита оружия с рукоятью в начале координат; `'stub'` —
    * брусок до кита; null — безоружный.
    */
@@ -444,7 +443,8 @@ class ModelFigure implements Figure {
     if (!twoHanded || this.armL === null || this.foreArmL === null) return
     // Левая ладонь — на цевьё. Клип задал направление, IK дотягивает кисть:
     // перенесённые на кота клипы кладут её рядом с оружием, но не на него.
-    const target = this.body.localToWorld(this.v2.copy(grip).addScaledVector(dir, this.hold))
+    // `dir` живёт в v2 — цель считается в своём векторе, иначе она затрёт направление.
+    const target = this.body.localToWorld(this.v3.copy(grip).addScaledVector(dir, this.hold))
     reach(this.armL, this.foreArmL, this.handL, target, DOWN)
   }
 }
@@ -492,7 +492,6 @@ export class Units {
   private readonly missMat = new THREE.MeshBasicMaterial({ color: PALETTE.tracer, transparent: true, opacity: 0.5 })
   private readonly signs = new Signs()
   private kit: CharacterKit | null = null
-  private catKit: CharacterKit | null = null
   private gunKit: GunKit | null = null
 
   /** Занятые клетки двора — стены, пропсы, контейнер: куда трупу не лечь. */
@@ -548,9 +547,8 @@ export class Units {
    * подмена не выглядит рывком. Мёртвые остаются капсулами: клип смерти
    * с середины боя проигрывать нечему.
    */
-  setKits(kit: CharacterKit, cat: CharacterKit | null, guns: GunKit | null): void {
+  setKits(kit: CharacterKit, guns: GunKit | null): void {
     this.kit = kit
-    this.catKit = cat
     this.gunKit = guns
     for (const obj of this.objects.values()) {
       if (obj.dead) continue
@@ -571,15 +569,14 @@ export class Units {
   private build(side: UnitView['side'], weapon: string): Figure {
     const color = side === 'player' ? PALETTE.ally : PALETTE.foe
     if (this.kit === null) return new StandInFigure(color, this.signs)
-    if (side === 'player' && this.catKit !== null) {
-      const rig = this.catKit.spawn(CAT_PARTS)
-      const combat = this.kit
-      const clipOf = (action: UnitView['action']): THREE.AnimationClip =>
-        action === 'idle' ? clip(rig, 'idle') : combat.clip(`cat_${CLIP_OF[action]}`)
-      return new ModelFigure(rig, clipOf, null, CAT_HEIGHT, this.signs, this.gun(weapon))
+    // Кит несёт оба скелета с костями Mixamo под одними именами: чужой —
+    // вон, иначе поиск сустава для оружия найдёт не тот.
+    if (side === 'player') {
+      const rig = this.kit.spawn(['cat_body'])
+      rig.root.getObjectByName('unit_rig')?.removeFromParent()
+      return new ModelFigure(rig, (action) => clip(rig, `cat_${CLIP_OF[action]}`), null, CAT_HEIGHT, this.signs, this.gun(weapon))
     }
     const rig = this.kit.spawn(['unit_body'])
-    // Кит юнитов несёт и скелет кота (для его боевых клипов): Y Bot он не нужен.
     rig.root.getObjectByName('cat_rig')?.removeFromParent()
     return new ModelFigure(rig, (action) => clip(rig, CLIP_OF[action]), color, MODEL_HEIGHT, this.signs, this.gun(weapon))
   }
@@ -668,7 +665,7 @@ export class Units {
     const stride = obj.figure.stride()
     if (obj.walked < stride) return
     obj.walked %= stride
-    const isCat = obj.side === 'player' && this.catKit !== null && this.kit !== null
+    const isCat = obj.side === 'player' && this.kit !== null
     audio.step(obj.figure.root.position.x, obj.figure.root.position.z, isCat ? CAT_WEIGHT : 1)
   }
 
