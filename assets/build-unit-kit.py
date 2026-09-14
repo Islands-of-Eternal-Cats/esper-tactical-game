@@ -211,6 +211,31 @@ def one_mesh(meshes, rig, name, flat):
     return body
 
 
+def soften_shoulders(body, rig):
+    """Веса плеч и рук — сгладить.
+
+    Автовеса Mixamo на толстой куртке кота режут сустав резко: рука,
+    поднятая вперёд в прицеле, ломала рукав складкой у плеча. Несколько
+    проходов сглаживания по группам плеча и плечевой кости растягивают
+    переход на соседние вершины — сустав гнётся, а не переламывается.
+    """
+    groups = [RIG + n for n in ("LeftShoulder", "RightShoulder", "LeftArm", "RightArm", "LeftForeArm", "RightForeArm")]
+    names = {g.name for g in body.vertex_groups}
+    groups = [g for g in groups if g in names]
+    if not groups:
+        return
+    bpy.ops.object.select_all(action="DESELECT")
+    body.select_set(True)
+    bpy.context.view_layer.objects.active = body
+    bpy.ops.object.mode_set(mode="WEIGHT_PAINT")
+    for g in groups:
+        body.vertex_groups.active_index = body.vertex_groups[g].index
+        bpy.ops.object.vertex_group_smooth(group_select_mode="ACTIVE", factor=0.5, repeat=6, expand=0.5)
+    bpy.ops.object.vertex_group_normalize_all(group_select_mode="ALL", lock_active=False)
+    bpy.ops.object.mode_set(mode="OBJECT")
+    log(f"плечи: веса сглажены ({len(groups)} групп)")
+
+
 def tris_of(obj):
     return sum(len(p.vertices) - 2 for p in obj.data.polygons)
 
@@ -387,6 +412,7 @@ def build_character(folder, prefix, rig_name, body_name, height, flat):
     body = one_mesh(meshes, rig, body_name, flat)
     decimate(body, TRIS if flat is not None else 10_000)
     if flat is None:
+        soften_shoulders(body, rig)
         graft_tail(rig, body, set(bpy.data.actions))
     for name, (path, loop) in clip_files.items():
         adopt(rig, path, name, loop, prefix)
