@@ -304,6 +304,9 @@ class ModelFigure implements Figure {
   private readonly gunAhead: number
   private readonly handR: THREE.Object3D | null
   private readonly handL: THREE.Object3D | null
+  /** Основания средних пальцев: кость кисти — запястье, а оружие лежит в ладони. */
+  private readonly fingerR: THREE.Object3D | null
+  private readonly fingerL: THREE.Object3D | null
   /** Точка цевья относительно рукояти, в осях оружия, м — куда ложится левая ладонь. */
   private readonly hold: THREE.Vector3
   /** Базовый масштаб модели оружия, как собрана. */
@@ -359,12 +362,14 @@ class ModelFigure implements Figure {
       // их не костями, а простыми узлами — ищутся по имени в иерархии.
       this.handR = joint(rig, 'mixamorig:RightHand')
       this.handL = joint(rig, 'mixamorig:LeftHand')
+      this.fingerR = joint(rig, 'mixamorig:RightHandMiddle1')
+      this.fingerL = joint(rig, 'mixamorig:LeftHandMiddle1')
     } else {
       this.gun = null
       this.gunAhead = 0
       this.hold = new THREE.Vector3()
       this.gunScale = 1
-      this.handR = this.handL = null
+      this.handR = this.handL = this.fingerR = this.fingerL = null
     }
 
     this.mixer = new THREE.AnimationMixer(rig.root)
@@ -431,17 +436,28 @@ class ModelFigure implements Figure {
     return footSpeed === null ? STANDIN_STRIDE : (footSpeed * current.getClip().duration) / 2
   }
 
+  /**
+   * Середина ладони в осях тела: кость кисти Mixamo — это запястье, а
+   * оружие лежит в ладони, на полпути к основанию среднего пальца.
+   */
+  private palm(hand: THREE.Object3D, finger: THREE.Object3D | null, out: THREE.Vector3): THREE.Vector3 {
+    this.body.worldToLocal(hand.getWorldPosition(out))
+    if (finger === null) return out
+    const tip = this.body.worldToLocal(finger.getWorldPosition(PALM))
+    return out.lerp(tip, PALM_AT)
+  }
+
   private placeGun(): void {
     if (this.gun === null || this.handR === null || this.handL === null) return
     this.body.updateWorldMatrix(true, true)
-    const grip = this.body.worldToLocal(this.handR.getWorldPosition(this.v1))
+    const grip = this.palm(this.handR, this.fingerR, this.v1)
     // Клипы кита — «с винтовкой», обе ладони уже поставлены под оружие, и
     // никакой IK: клип авторский. Оружие ставится по двум точкам: рукоять —
     // в правую ладонь, цевьё — в левую. Цевьё выше рукояти (коробка над
     // пистолетной рукоятью), поэтому ствол — не линия ладоней, а она же,
     // повёрнутая на угол «рукоять — цевьё» в осях оружия; длина между
     // точками подгоняется масштабом.
-    const d = this.body.worldToLocal(this.handL.getWorldPosition(this.v2)).sub(grip)
+    const d = this.palm(this.handL, this.fingerL, this.v2).sub(grip)
     const span = d.length()
     if (span < 1e-3) return
     d.divideScalar(span)
@@ -460,6 +476,9 @@ class ModelFigure implements Figure {
 }
 
 const ZERO = new THREE.Vector3()
+/** Где в ладони лежит оружие: доля пути от запястья к основанию среднего пальца. */
+const PALM_AT = 0.55
+const PALM = new THREE.Vector3()
 const UP = new THREE.Vector3(0, 1, 0)
 const LOOK = new THREE.Matrix4()
 
