@@ -425,7 +425,7 @@ class ModelFigure implements Figure {
       if (this.gun !== null) this.gun.visible = false
       return
     }
-    this.placeGun()
+    this.placeGun(action === 'aim' || action === 'fire')
   }
 
   /** Цикл бега — два шага: путь за клип пополам. */
@@ -447,7 +447,7 @@ class ModelFigure implements Figure {
     return out.lerp(tip, PALM_AT)
   }
 
-  private placeGun(): void {
+  private placeGun(aiming: boolean): void {
     if (this.gun === null || this.handR === null || this.handL === null) return
     this.body.updateWorldMatrix(true, true)
     const grip = this.palm(this.handR, this.fingerR, this.v1)
@@ -468,6 +468,11 @@ class ModelFigure implements Figure {
     if (up.lengthSq() < 1e-6) up.set(0, 0, -1)
     up.normalize()
     const fwd = d.multiplyScalar(Math.cos(pitch)).addScaledVector(up, -Math.sin(pitch))
+    // В прицеле и при выстреле ствол — строго по телу, горизонтально: тело
+    // уже повёрнуто на цель, а дыхание клипа и отдача качали бы ствол вместе
+    // с ладонями. Левая кисть при этом остаётся, где её держит клип, — у
+    // родного клипа она и так у цевья.
+    if (aiming) fwd.set(0, 0, 1)
     LOOK.lookAt(fwd, ZERO, UP)
     this.gun.quaternion.setFromRotationMatrix(LOOK)
     this.gun.position.copy(grip).addScaledVector(fwd, this.gunAhead)
