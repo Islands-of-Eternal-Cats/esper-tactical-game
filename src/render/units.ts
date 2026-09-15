@@ -314,6 +314,7 @@ class ModelFigure implements Figure {
   private readonly v1 = new THREE.Vector3()
   private readonly v2 = new THREE.Vector3()
   private readonly v3 = new THREE.Vector3()
+  private readonly v4 = new THREE.Vector3()
 
   /**
    * `clipsOf(action)` — откуда брать клип: у Y Bot всё из одного кита, у
@@ -457,7 +458,8 @@ class ModelFigure implements Figure {
     // пистолетной рукоятью), поэтому ствол — не линия ладоней, а она же,
     // повёрнутая на угол «рукоять — цевьё» в осях оружия; длина между
     // точками подгоняется масштабом.
-    const d = this.palm(this.handL, this.fingerL, this.v2).sub(grip)
+    const left = this.palm(this.handL, this.fingerL, this.v4)
+    const d = this.v2.copy(left).sub(grip)
     const span = d.length()
     if (span < 1e-3) return
     d.divideScalar(span)
@@ -475,8 +477,15 @@ class ModelFigure implements Figure {
     if (aiming) fwd.set(0, 0, 1)
     LOOK.lookAt(fwd, ZERO, UP)
     this.gun.quaternion.setFromRotationMatrix(LOOK)
-    this.gun.position.copy(grip).addScaledVector(fwd, this.gunAhead)
-    if (hold > 0) this.gun.scale.setScalar(this.gunScale * Math.min(1.25, Math.max(0.8, span / hold)))
+    const k = hold > 0 ? Math.min(1.15, Math.max(0.8, span / hold)) : 1
+    this.gun.scale.setScalar(this.gunScale * k)
+    if (aiming && hold > 0) {
+      // Якорь — левая ладонь: она впереди и на виду, цевьё ложится в неё;
+      // правая кисть накрывает рукоять и небольшую невязку прячет.
+      this.gun.position.copy(left).sub(this.v3.copy(this.hold).multiplyScalar(k).applyQuaternion(this.gun.quaternion))
+    } else {
+      this.gun.position.copy(grip).addScaledVector(fwd, this.gunAhead)
+    }
   }
 }
 
