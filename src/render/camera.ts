@@ -86,6 +86,12 @@ export class IsoCamera {
     this.apply()
   }
 
+  /** Отладка: зум точным числом. */
+  zoomTo(zoom: number): void {
+    this.zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom))
+    this.apply()
+  }
+
   zoomBy(delta: number): void {
     this.zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, this.zoom * Math.exp(-delta * 0.0015)))
     this.apply()

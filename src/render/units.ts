@@ -534,6 +534,8 @@ export class Units {
   private readonly missMat = new THREE.MeshBasicMaterial({ color: PALETTE.tracer, transparent: true, opacity: 0.5 })
   private readonly signs = new Signs()
   private kit: CharacterKit | null = null
+  /** Отладка (лист состояний): всем фигурам — это действие и этот поворот, снапшот не в счёт. */
+  debug: { only: string; action: UnitView['action']; yaw: number; at: THREE.Vector3 } | null = null
   private gunKit: GunKit | null = null
 
   /** Занятые клетки двора — стены, пропсы, контейнер: куда трупу не лечь. */
@@ -685,6 +687,15 @@ export class Units {
     } else {
       const [hx, hz] = HEADING[view.facing]
       yawTarget = Math.atan2(hx, hz)
+    }
+    if (this.debug !== null) {
+      // Снимается одна фигура; остальные — прочь из кадра, но живут: клипы им тоже идут.
+      obj.figure.root.position.copy(this.debug.at)
+      if (view.id !== this.debug.only) obj.figure.root.position.x += 100
+      obj.figure.setYaw(this.debug.yaw)
+      obj.figure.overlay.hide()
+      obj.figure.animate(this.debug.action, dt, this.debug.action === 'move' ? 1 : 0)
+      return
     }
     if (view.action !== 'dead') obj.yaw = approachAngle(obj.yaw, yawTarget, TURN_RATE, dt)
     else if (!obj.dead) obj.yaw = this.fallYaw(this.a, obj.yaw)

@@ -10,7 +10,7 @@ import type { Cell, Snapshot, UnitView, WorldView } from '../shared/protocol'
 import { IsoCamera } from './camera'
 import { Cats } from './cats'
 import { type CharacterKit, type EnvKit, type GunKit, type KitLoads, loadGunKit, loadUnitKit } from './model'
-import { Kit, worldToCell } from './kit'
+import { Kit, cellToWorld, worldToCell } from './kit'
 import { PALETTE } from './palette'
 import { Select } from './select'
 import { Units } from './units'
@@ -412,6 +412,86 @@ export class SceneView {
   private follow = false
 
   /** `dt` — реальное время кадра в секундах, умноженное на скорость. */
+  /**
+   * Отладка: лист состояний. Обе фигуры (кот и Y Bot) в каждом действии с
+   * трёх сторон — одной картинкой, чтобы смотреть оружие в руках разом, а не
+   * ловить кадры в бою. Пишется dev-сервером в assets/sheet.jpg
+   * (см. vite.config.ts). Только в перестрелке и только с китами.
+   */
+  async sheet(): Promise<string> {
+    const snap = this.snap
+    if (snap === null) throw new Error('нет снапшота')
+    const ids = ['a1', 'b1']
+    const actions: UnitView['action'][] = ['idle', 'move', 'aim', 'fire', 'dead']
+    const views: [string, number][] = [['спереди', 0], ['сбоку', Math.PI / 2], ['сзади', Math.PI]]
+    const TILE_W = 300
+    const TILE_H = 380
+    const cols = ids.length * views.length
+    const out = document.createElement('canvas')
+    out.width = cols * TILE_W
+    out.height = actions.length * TILE_H + 24
+    const ctx = out.getContext('2d')!
+    ctx.fillStyle = '#14171c'
+    ctx.fillRect(0, 0, out.width, out.height)
+    ctx.fillStyle = '#c9d1d9'
+    ctx.font = '14px sans-serif'
+    const src = this.renderer.domElement
+    const dpr = src.width / src.clientWidth
+    const dir = new THREE.Vector3()
+    this.view.rotate(0)
+    this.view.zoomTo(6)
+    let col = 0
+    for (const id of ids) {
+      for (const [name] of views) {
+        ctx.fillText(`${id} ${name}`, col * TILE_W + 8, 16)
+        col++
+      }
+    }
+    // Фигуры ставятся на свободное место, а не где стоят: у стены половина
+    // фигуры за стеной. Свободная клетка — та, вокруг которой ни стен, ни пропсов.
+    const solid = new Set<number>()
+    for (const c of this.world.walls) solid.add(c.y * this.world.width + c.x)
+    for (const p of this.world.props) solid.add(p.cell.y * this.world.width + p.cell.x)
+    let spot: Cell = { x: 2, y: 2 }
+    outer: for (let y = 2; y < this.world.height - 2; y++) {
+      for (let x = 2; x < this.world.width - 2; x++) {
+        let free = true
+        for (let dy = -2; dy <= 2 && free; dy++) for (let dx = -2; dx <= 2; dx++) if (solid.has((y + dy) * this.world.width + x + dx)) { free = false; break }
+        if (free) { spot = { x, y }; break outer }
+      }
+    }
+    const at = cellToWorld(spot, this.world)
+    this.view.lookAtCentre(at.x, at.z)
+    this.view.camera.getWorldDirection(dir)
+    const faceCam = Math.atan2(-dir.x, -dir.z)
+    for (let r = 0; r < actions.length; r++) {
+      const action = actions[r]!
+      col = 0
+      for (const id of ids) {
+        if (this.units.positionOf(id) === null) continue
+        for (const [, off] of views) {
+          this.units.debug = { only: id, action, yaw: faceCam + off, at }
+          // Кроссфейд и середина клипа: секунда модельного времени кадрами по 1/30.
+          for (let i = 0; i < 30; i++) this.units.sync(snap, 1 / 30, this.view.camera)
+          this.renderer.render(this.scene, this.view.camera)
+          // Фигура стоит в центре экрана ногами; окно — вверх от него.
+          const cx = src.width / 2
+          const cy = src.height / 2
+          const w = TILE_W * dpr
+          const h = TILE_H * dpr
+          ctx.drawImage(src, cx - w / 2, cy - h * 0.68, w, h, col * TILE_W, 24 + r * TILE_H, TILE_W, TILE_H)
+          col++
+        }
+      }
+      ctx.fillText(action, 8, 24 + r * TILE_H + 16)
+    }
+    this.units.debug = null
+    const blob = await new Promise<Blob | null>((ok) => out.toBlob(ok, 'image/jpeg', 0.9))
+    if (blob === null) throw new Error('canvas.toBlob')
+    const res = await fetch('/__sheet', { method: 'POST', body: blob })
+    return await res.text()
+  }
+
   render(snap: Snapshot | null, dt: number): void {
     if (this.contextLost) return
     audio.frame(this.view.camera)
