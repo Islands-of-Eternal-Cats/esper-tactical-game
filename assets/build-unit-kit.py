@@ -28,8 +28,10 @@ import glob
 import os
 import sys
 
+import math
+
 import bpy
-from mathutils import Matrix, Vector
+from mathutils import Matrix, Quaternion, Vector
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Два типа тела — два скелета, два набора клипов. Свои — кот, противник —
@@ -322,6 +324,60 @@ def adopt(rig, path, name, loop, prefix):
 # Хвост
 # --------------------------------------------------------------------------
 
+X_AXIS = Vector((1.0, 0.0, 0.0))
+Z_AXIS = Vector((0.0, 0.0, 1.0))
+
+# Как хвост живёт в каждом клипе: волн за клип, размах вбок, подъём.
+# Волна одна на цикл бега (два шага), в покое — медленная и мелкая,
+# при смерти хвост опадает и замирает.
+TAIL_WAVES = {
+    "idle": (2.0, 0.6, 0.15),
+    "run": (1.0, 1.0, 0.0),
+    "aim": (1.0, 0.35, 0.1),
+    "fire": (0.25, 0.35, 0.1),
+    "die": (0.0, 0.0, -0.6),
+}
+
+
+def to_bone(pb, turns):
+    """Повороты вокруг мировых осей → кватернион в базисе кости (как в ките кота)."""
+    q = Quaternion((1.0, 0.0, 0.0, 0.0))
+    for axis, angle in turns:
+        q = Quaternion(axis, angle) @ q
+    m = pb.bone.matrix_local.to_quaternion()
+    return m.inverted() @ q @ m
+
+
+def wag_tail(rig, act, name, first, last):
+    """Хвост — в клип Mixamo, где его нет: одна волна с отставанием по звеньям,
+    та же, что у кота во дворе (`tail()` в build-character-kit.py)."""
+    waves, gain, lift0 = TAIL_WAVES.get(name, (1.0, 0.5, 0.1))
+    ad = rig.animation_data
+    ad.action = act
+    if hasattr(ad, "action_slot") and ad.action_slot is None:
+        ad.action_slot = act.slots[0]
+    bones = [rig.pose.bones[f"tail_{i}"] for i in (1, 2, 3)]
+    swing = (0.16, 0.22, 0.26)
+    rise = (0.10, 0.16, 0.22)
+    n = max(1, int(last) - int(first))
+    for f in range(int(first), int(last) + 1):
+        t = (f - int(first)) / n
+        phase = 2.0 * math.pi * waves * t
+        side = math.sin(phase) * gain
+        lift = lift0 + 0.12 * (1.0 - math.cos(2.0 * phase)) * gain
+        if name == "die":
+            # Опадает за первую треть клипа и лежит.
+            k = min(1.0, t * 3.0)
+            side = 0.0
+            lift = lift0 * k
+        for i, pb in enumerate(bones):
+            pb.rotation_mode = "QUATERNION"
+            pb.rotation_quaternion = to_bone(pb, [(Z_AXIS, side * swing[i]), (X_AXIS, lift * rise[i])])
+            pb.keyframe_insert("rotation_quaternion", frame=f)
+    ad.action = None
+    for pb in bones:
+        pb.rotation_quaternion = (1.0, 0.0, 0.0, 0.0)
+
 def graft_tail(rig, body, keep_actions):
     """Хвост из эталона — на скелет Mixamo.
 
@@ -415,7 +471,10 @@ def build_character(folder, prefix, rig_name, body_name, height, flat):
         soften_shoulders(body, rig)
         graft_tail(rig, body, set(bpy.data.actions))
     for name, (path, loop) in clip_files.items():
-        adopt(rig, path, name, loop, prefix)
+        act = adopt(rig, path, name, loop, prefix)
+        if flat is None:
+            first, last = act.frame_range
+            wag_tail(rig, act, name, first, last)
     log(f"{body_name}: {tris_of(body)} тр.")
 
 
